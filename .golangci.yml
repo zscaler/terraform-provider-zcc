@@ -1,0 +1,13 @@
+version: "2"
+
+linters:
+  exclusions:
+    rules:
+      - path: internal/
+        linters:
+          - staticcheck
+        text: SA1019
+      - path: (.+)\.go$
+        text: 'not declared by package utf8'
+      - path: (.+)\.go$
+        text: 'unicode/utf8/utf8.go'

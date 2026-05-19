@@ -1,0 +1,87 @@
+name: ZCC Test
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+  # For systems with an upstream API that could drift unexpectedly (like most SaaS systems, etc.),
+  # we recommend testing at a regular interval not necessarily tied to code changes. This will
+  # ensure you are alerted to something breaking due to an API change, even if the code did not
+  # change.
+
+  schedule:
+    - cron: '0 12 * * 1-5' # UTC
+  workflow_dispatch:
+
+jobs:
+  zcc-zs3-tenants:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        goVersion: ["1.25"]
+        environment:
+          - ZCC_ZS3_TENANT01
+    environment: ${{ matrix.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+              token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.goVersion }}
+
+      - name: Clean existing Go modules
+        run: go clean -modcache
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/go/pkg/mod
+            ~/.cache/go-build
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: Setup Go Tools
+        run: make tools
+
+      - name: Download Go Dependencies
+        run: |
+          go mod tidy && go mod vendor
+
+      - name: Setup Go Tools
+        run: make tools
+
+      - name: Check Formatting
+        run: make fmtcheck
+
+      - name: Lint Code
+        run: make lint
+
+      - name: Check Build
+        run: make build
+
+      - name: Run tests with retry
+        uses: nick-fields/retry@v3
+        with:
+          max_attempts: 1
+          timeout_minutes: 30  # Adjust as needed
+          command: |
+            make sweep
+            make test:integration:zcc
+            make sweep
+        env:
+          ZSCALER_CLIENT_ID: ${{ secrets.ZSCALER_CLIENT_ID }}
+          ZSCALER_CLIENT_SECRET: ${{ secrets.ZSCALER_CLIENT_SECRET }}
+          ZSCALER_VANITY_DOMAIN: ${{ secrets.ZSCALER_VANITY_DOMAIN }}
+          ZSCALER_CLOUD: ${{ secrets.ZSCALER_CLOUD }}
+          ZCC_SDK_TEST_SWEEP: ${{ secrets.ZCC_SDK_TEST_SWEEP }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TF_ACC: ${{ secrets.TF_ACC }}
+          ZCC_ACC_TEST_FORCE_SWEEPERS: ${{ secrets.ZCC_ACC_TEST_FORCE_SWEEPERS }}
