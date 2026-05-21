@@ -998,43 +998,13 @@ func FlattenWebPolicyBase(p *web_policy.WebPolicy, base *WebPolicyBaseModel) {
 
 // =============================================================================
 // Small attribute helpers (unexported — internal to this package)
+//
+// Most generic attr.Value/list-of-attr extractors have moved to the
+// shared internal/framework/helpers package. What stays here is only
+// the IntOrString-bridge logic that the policyExtensionStringFields
+// machinery depends on (parked alongside the per-OS app_profile_*
+// resources under local_dev/Backup_Config_Future/).
 // =============================================================================
-
-// boolFromAttr extracts a Go bool from a Plugin Framework attr.Value,
-// returning false for null/unknown/non-bool inputs.
-func boolFromAttr(v attr.Value) bool {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return false
-	}
-	if b, ok := v.(types.Bool); ok {
-		return b.ValueBool()
-	}
-	return false
-}
-
-// intFromAttr extracts a Go int from a Plugin Framework attr.Value,
-// returning 0 for null/unknown/non-int64 inputs.
-func intFromAttr(v attr.Value) int {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return 0
-	}
-	if i, ok := v.(types.Int64); ok {
-		return int(i.ValueInt64())
-	}
-	return 0
-}
-
-// stringFromAttr extracts a Go string from a Plugin Framework attr.Value,
-// returning "" for null/unknown/non-string inputs.
-func stringFromAttr(v attr.Value) string {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return ""
-	}
-	if s, ok := v.(types.String); ok {
-		return s.ValueString()
-	}
-	return ""
-}
 
 // intOrStringFieldToString is the bridge between the SDK's
 // common.IntOrString fields (numeric on the wire, but historically
@@ -1093,26 +1063,6 @@ func stringListFromList(l types.List) []string {
 		}
 	}
 	return out
-}
-
-// intListFromAttr is the attr.Value variant of intListFromList; it
-// type-asserts to types.List first and returns an empty slice on
-// mismatch.
-func intListFromAttr(v attr.Value) []int {
-	if l, ok := v.(types.List); ok {
-		return intListFromList(l)
-	}
-	return []int{}
-}
-
-// stringListFromAttr is the attr.Value variant of stringListFromList; it
-// type-asserts to types.List first and returns an empty slice on
-// mismatch.
-func stringListFromAttr(v attr.Value) []string {
-	if l, ok := v.(types.List); ok {
-		return stringListFromList(l)
-	}
-	return []string{}
 }
 
 // intListValue wraps a Go []int into a types.List of Int64 for state

@@ -1,8 +1,14 @@
 SWEEP?=global
 TEST?=$$(go list ./... |grep -v 'vendor')
-GOFMT_FILES?=$$(find . -name '*.go' |grep "zcc/")
+GOFMT_FILES?=$$(find . -name '*.go' | grep -v vendor)
 WEBSITE_REPO=github.com/hashicorp/terraform-website
 PKG_NAME=zcc
+# LINT_PKG is the import path the lint target inspects. ZCC's
+# provider code lives under ./internal/... (Plugin Framework layout),
+# unlike terraform-provider-zia / terraform-provider-zpa which still
+# keep SDK v2 code at ./$(PKG_NAME). See the `lint:` target below for
+# why we do not use tfproviderlint on Framework code.
+LINT_PKG=./internal/...
 GOFMT:=gofumpt
 TFPROVIDERLINT=tfproviderlint
 STATICCHECK=staticcheck
@@ -99,28 +105,23 @@ test-compile:
 
 lint:
 	@echo "==> Checking source code against linters..."
-	@$(TFPROVIDERLINT) \
-		-c 1 \
-		-AT001 \
-    	-R004 \
-		-S001 \
-		-S002 \
-		-S003 \
-		-S004 \
-		-S005 \
-		-S007 \
-		-S008 \
-		-S009 \
-		-S010 \
-		-S011 \
-		-S012 \
-		-S013 \
-		-S014 \
-		-S015 \
-		-S016 \
-		-S017 \
-		-S019 \
-		./$(PKG_NAME)
+	@# tfproviderlint's -AT001 / -R004 / -S00x checks are SDK v2-specific:
+	@# they require *schema.Resource / *schema.Schema composite literals
+	@# to analyse and fail their prerequisites on Plugin Framework code.
+	@# This provider is Plugin Framework only (no SDK v2 surface), so we
+	@# mirror terraform-provider-confluent's stance and rely on tools
+	@# that actually understand the Framework AST: gofumpt for format,
+	@# go vet for correctness, staticcheck for semantic bugs.
+	@echo "==> gofumpt (format check)"
+	@if [ -n "$$($(GOFMT) -l $(LINT_PKG:./%/...=./%) 2>/dev/null)" ]; then \
+		echo "gofumpt findings (run 'make fmt' to fix):"; \
+		$(GOFMT) -l $(LINT_PKG:./%/...=./%); \
+		exit 1; \
+	fi
+	@echo "==> go vet"
+	@go vet $(LINT_PKG)
+	@echo "==> staticcheck"
+	@$(STATICCHECK) $(LINT_PKG)
 
 tools:
 	@which $(GOFMT) || go install mvdan.cc/gofumpt@v0.9.2
