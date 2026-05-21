@@ -23,9 +23,6 @@
 package common
 
 import (
-	"context"
-	"errors"
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -35,9 +32,6 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
-	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/zscaler/zscaler-sdk-go/v3/zscaler"
-	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
 	zccCommon "github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/common"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/web_policy"
 
@@ -932,6 +926,7 @@ func ExpandWebPolicyBase(base *WebPolicyBaseModel, payload *web_policy.WebPolicy
 	ExpandPolicyExtension(base.PolicyExtension, &payload.PolicyExtension)
 }
 
+/*
 // NewDefaultWebPolicyForDeviceType returns the per-device-type baseline
 // WebPolicy the provider should seed an /edit request with. Each return
 // value mirrors the byte-for-byte shape a fresh UI save produces (see
@@ -948,7 +943,7 @@ func NewDefaultWebPolicyForDeviceType(deviceType int) web_policy.WebPolicy {
 		return web_policy.WebPolicy{}
 	}
 }
-
+*/
 // FlattenWebPolicyBase populates every shared field from the GET response
 // into the embedded base model. OS-specific blocks are flattened in the
 // calling resource using its own helper.
@@ -1142,6 +1137,7 @@ func stringListValue(in []string) types.List {
 	return out
 }
 
+/*
 // =============================================================================
 // Lifecycle helpers
 // =============================================================================
@@ -1346,3 +1342,4 @@ func RunDelete(ctx context.Context, service *zscaler.Service, idStr string) erro
 	}
 	return nil
 }
+*/
