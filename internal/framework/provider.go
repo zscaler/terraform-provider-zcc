@@ -23,23 +23,24 @@ type ZCCProvider struct {
 	version string
 }
 
-// ZCCProviderModel describes the provider data model.
+// ZCCProviderModel describes the provider data model. Authentication
+// is OneAPI (Zidentity) only — the legacy ZCC V2 client
+// (zcc_client_id / zcc_client_secret / zcc_cloud /
+// use_legacy_client) has been removed; existing configurations
+// referencing those attributes must migrate to ZSCALER_CLIENT_ID /
+// ZSCALER_CLIENT_SECRET (or ZSCALER_PRIVATE_KEY) + ZSCALER_VANITY_DOMAIN.
 type ZCCProviderModel struct {
-	ClientID        types.String `tfsdk:"client_id"`
-	ClientSecret    types.String `tfsdk:"client_secret"`
-	PrivateKey      types.String `tfsdk:"private_key"`
-	VanityDomain    types.String `tfsdk:"vanity_domain"`
-	ZscalerCloud    types.String `tfsdk:"zscaler_cloud"`
-	ZCCClientID     types.String `tfsdk:"zcc_client_id"`
-	ZCCClientSecret types.String `tfsdk:"zcc_client_secret"`
-	ZCCCloud        types.String `tfsdk:"zcc_cloud"`
-	UseLegacyClient types.Bool   `tfsdk:"use_legacy_client"`
-	HTTPProxy       types.String `tfsdk:"http_proxy"`
-	MaxRetries      types.Int64  `tfsdk:"max_retries"`
-	Parallelism     types.Int64  `tfsdk:"parallelism"`
-	RequestTimeout  types.Int64  `tfsdk:"request_timeout"`
-	MinWaitSeconds  types.Int64  `tfsdk:"min_wait_seconds"`
-	MaxWaitSeconds  types.Int64  `tfsdk:"max_wait_seconds"`
+	ClientID       types.String `tfsdk:"client_id"`
+	ClientSecret   types.String `tfsdk:"client_secret"`
+	PrivateKey     types.String `tfsdk:"private_key"`
+	VanityDomain   types.String `tfsdk:"vanity_domain"`
+	ZscalerCloud   types.String `tfsdk:"zscaler_cloud"`
+	HTTPProxy      types.String `tfsdk:"http_proxy"`
+	MaxRetries     types.Int64  `tfsdk:"max_retries"`
+	Parallelism    types.Int64  `tfsdk:"parallelism"`
+	RequestTimeout types.Int64  `tfsdk:"request_timeout"`
+	MinWaitSeconds types.Int64  `tfsdk:"min_wait_seconds"`
+	MaxWaitSeconds types.Int64  `tfsdk:"max_wait_seconds"`
 }
 
 func (p *ZCCProvider) Metadata(ctx context.Context, req provider.MetadataRequest, resp *provider.MetadataResponse) {
@@ -74,23 +75,6 @@ func (p *ZCCProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 				Optional:    true,
 				Sensitive:   true,
 			},
-			"zcc_client_id": schema.StringAttribute{
-				Description: "ZCC legacy API client ID (env: ZCC_CLIENT_ID)",
-				Optional:    true,
-			},
-			"zcc_client_secret": schema.StringAttribute{
-				Description: "ZCC legacy API client secret (env: ZCC_CLIENT_SECRET)",
-				Optional:    true,
-				Sensitive:   true,
-			},
-			"zcc_cloud": schema.StringAttribute{
-				Description: "ZCC cloud, e.g. production, beta (env: ZCC_CLOUD)",
-				Optional:    true,
-			},
-			"use_legacy_client": schema.BoolAttribute{
-				Description: "Enable ZCC V2 (legacy) client",
-				Optional:    true,
-			},
 			"http_proxy": schema.StringAttribute{
 				Description: "Alternate HTTP proxy of scheme://hostname or scheme://hostname:port format",
 				Optional:    true,
@@ -122,25 +106,29 @@ func (p *ZCCProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 func (p *ZCCProvider) Resources(ctx context.Context) []func() resource.Resource {
 	return []func() resource.Resource{
 		resources.NewTrustedNetworkResource,
+		resources.NewNotificationTemplateResource,
+		resources.NewZIAPostureResource,
 		resources.NewForwardingProfileResource,
 		resources.NewFailOpenPolicyResource,
 		// Singleton: ZCC device cleanup (GET getDeviceCleanupInfo / PUT setDeviceCleanupInfo).
 		resources.NewDeviceCleanupResource,
 		resources.NewWebAppServiceResource,
 		resources.NewWebPrivacyResource,
-		// Per-OS app profiles backed by /web/policy/edit (singleton-style PUT
-		// create+update plus a re-read via list-by-deviceType).
-		resources.NewAppProfileWindowsResource,
-		resources.NewAppProfileMacosResource,
-		resources.NewAppProfileLinuxResource,
-		resources.NewAppProfileIosResource,
-		resources.NewAppProfileAndroidResource,
+		// Per-OS app profiles (zcc_app_profile_macos, _ios, _windows,
+		// _linux, _android) backed by /web/policy/edit are intentionally
+		// deregistered. The underlying singleton API is unstable —
+		// success responses depend on undocumented field/type
+		// combinations that vary per OS and per UI capture — so the
+		// resources are parked under local_dev/Backup_Config_Future
+		// until the API contract is stabilised upstream.
 	}
 }
 
 func (p *ZCCProvider) DataSources(ctx context.Context) []func() datasource.DataSource {
 	return []func() datasource.DataSource{
 		datasources.NewTrustedNetworkDataSource,
+		datasources.NewNotificationTemplateDataSource,
+		datasources.NewZIAPostureDataSource,
 		datasources.NewAdminRolesDataSource,
 		datasources.NewForwardingProfileDataSource,
 		datasources.NewAdminUserDataSource,
@@ -148,7 +136,7 @@ func (p *ZCCProvider) DataSources(ctx context.Context) []func() datasource.DataS
 		datasources.NewCustomIPAppsDataSource,
 		datasources.NewPredefinedIPAppsDataSource,
 		datasources.NewProcessBasedAppsDataSource,
-		datasources.NewApplicationProfilesDataSource,
+		// datasources.NewApplicationProfilesDataSource — deregistered with the per-OS app_profile resources; the underlying /web/policy APIs are still being stabilised upstream.
 		datasources.NewWebAppServiceDataSource,
 		datasources.NewFailOpenPolicyDataSource,
 		datasources.NewDeviceCleanupDataSource,

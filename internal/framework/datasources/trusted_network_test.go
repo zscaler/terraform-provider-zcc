@@ -24,7 +24,8 @@ func TestAccDataSourceTrustedNetwork_byID(t *testing.T) {
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrPair(dataSourceName, "id", resourceName, "id"),
 					resource.TestCheckResourceAttrPair(dataSourceName, "network_name", resourceName, "network_name"),
-					resource.TestCheckResourceAttrPair(dataSourceName, "trusted_subnets", resourceName, "trusted_subnets"),
+					resource.TestCheckResourceAttrPair(dataSourceName, "trusted_subnet_ips.#", resourceName, "trusted_subnet_ips.#"),
+					resource.TestCheckResourceAttrPair(dataSourceName, "trusted_subnet_ips.0", resourceName, "trusted_subnet_ips.0"),
 				),
 			},
 		},
@@ -36,9 +37,10 @@ func testAccDataSourceTrustedNetworkByIDConfig(name string) string {
 provider "zcc" {}
 
 resource "zcc_trusted_network" "this" {
-  network_name    = %[1]q
-  active          = true
-  trusted_subnets = "192.0.2.0/24"
+  network_name       = %[1]q
+  active             = true
+  condition_type     = "ALL"
+  trusted_subnet_ips = ["192.0.2.0/24"]
 }
 
 data "zcc_trusted_network" "by_id" {

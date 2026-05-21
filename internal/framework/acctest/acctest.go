@@ -3,7 +3,6 @@ package acctest
 
 import (
 	"os"
-	"strings"
 	"testing"
 
 	"github.com/hashicorp/terraform-plugin-framework/providerserver"
@@ -19,19 +18,14 @@ var ProtoV6ProviderFactories = map[string]func() (tfprotov6.ProviderServer, erro
 	"zcc": providerserver.NewProtocol6WithError(framework.New("test")),
 }
 
-// PreCheck skips or fails fast when acceptance tests cannot authenticate.
+// PreCheck skips or fails fast when acceptance tests cannot authenticate
+// against OneAPI. The legacy ZCC V2 client has been removed; tests now
+// require ZSCALER_CLIENT_ID + ZSCALER_VANITY_DOMAIN + either
+// ZSCALER_CLIENT_SECRET or ZSCALER_PRIVATE_KEY.
 func PreCheck(t *testing.T) {
 	t.Helper()
 	if os.Getenv("TF_ACC") == "" {
 		t.Fatal("TF_ACC must be set for acceptance tests")
-	}
-
-	legacy := strings.EqualFold(os.Getenv("ZSCALER_USE_LEGACY_CLIENT"), "true")
-	if legacy {
-		if os.Getenv("ZCC_CLIENT_ID") == "" || os.Getenv("ZCC_CLIENT_SECRET") == "" {
-			t.Fatal("ZCC_CLIENT_ID and ZCC_CLIENT_SECRET must be set when ZSCALER_USE_LEGACY_CLIENT is true")
-		}
-		return
 	}
 
 	if os.Getenv("ZSCALER_CLIENT_ID") == "" || os.Getenv("ZSCALER_VANITY_DOMAIN") == "" {
@@ -65,10 +59,6 @@ func testClientConfig() *client.Config {
 		PrivateKey:       os.Getenv("ZSCALER_PRIVATE_KEY"),
 		VanityDomain:     os.Getenv("ZSCALER_VANITY_DOMAIN"),
 		Cloud:            os.Getenv("ZSCALER_CLOUD"),
-		ZCCClientID:      os.Getenv("ZCC_CLIENT_ID"),
-		ZCCClientSecret:  os.Getenv("ZCC_CLIENT_SECRET"),
-		ZCCCloud:         os.Getenv("ZCC_CLOUD"),
-		UseLegacyClient:  strings.EqualFold(os.Getenv("ZSCALER_USE_LEGACY_CLIENT"), "true"),
 		HTTPProxy:        os.Getenv("ZSCALER_HTTP_PROXY"),
 		TerraformVersion: os.Getenv("TF_ACC_TERRAFORM_VERSION"),
 		ProviderVersion:  version.ProviderVersion,

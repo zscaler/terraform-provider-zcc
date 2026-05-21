@@ -1,0 +1,1 @@
+data "zcc_web_privacy" "this" {}

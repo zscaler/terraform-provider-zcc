@@ -2,19 +2,33 @@
 page_title: "zcc_trusted_network Data Source - terraform-provider-zcc"
 subcategory: "Trusted Network"
 description: |-
-  Official documentation: https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller/gets-the-list-of-trusted-networks-by-company
-  Looks up a ZCC trusted network by id or network_name.
+  Official documentation: https://help.zscaler.com/zscaler-client-connector/configuring-trusted-network-rule
+  Looks up a ZCC trusted network by id or by name.
 ---
 
 # zcc_trusted_network (Data Source)
 
-* [Zscaler Client Connector product documentation](https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller/gets-the-list-of-trusted-networks-by-company)
+[![General Availability](https://img.shields.io/badge/Lifecycle%20Stage-General%20Availability-%2345c6e8)](https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller)
+
+* [Official documentation](https://help.zscaler.com/zscaler-client-connector/configuring-trusted-network-rule)
+* [Automation Hub API reference](https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller)
+* [Legacy API reference](https://help.zscaler.com/legacy-apis/public-api-controller)
+
+Reads a ZCC trusted network via `/zcc/papi/public/v2/trusted-networks`, by numeric id or by name.
 
 ## Example Usage
 
 ```terraform
-data "zcc_trusted_network" "example" {
-  network_name = "corp-office"
+data "zcc_trusted_network" "corp_office" {
+  name = "corp-office"
+}
+
+data "zcc_trusted_network" "by_id" {
+  id = "12345"
+}
+
+output "corp_subnets" {
+  value = data.zcc_trusted_network.corp_office.trusted_subnet_ips
 }
 ```
 
@@ -22,11 +36,24 @@ data "zcc_trusted_network" "example" {
 
 ### Optional
 
-- `id` (String) — Trusted network ID.
-- `network_name` (String) — Trusted network name.
-
-One of `id` or `network_name` is required.
+- `id` (String) — Numeric identifier of the trusted network. Either `id` or `name` must be set.
+- `name` (String) — Display name of the trusted network. Either `id` or `name` must be set.
 
 ### Read-Only
 
-Attributes mirror the **zcc_trusted_network** resource (`active`, `condition_type` as a number, DNS/SSID/trusted fields, `guid`, etc.).
+- `active` (Boolean) — Whether the trusted network is active.
+- `condition_type` (String) — Match policy applied across the criteria below (`ALL` / `ANY`).
+- `company_id` (Number) — Numeric company id the network is scoped to.
+- `zpa_id` (String) — Linked ZPA tenant identifier.
+- `guid` (String) — Stable GUID of the trusted network.
+- `created_by` (String) — Administrator who created the trusted network.
+- `edited_by` (String) — Administrator who last edited the trusted network.
+- `hostname` (String) — Hostname used to identify the network.
+- `ssid` (String) — Wi-Fi SSID the network is identified by.
+- `dns_search_domains` (List of String) — DNS search-domain suffixes.
+- `dns_server_ips` (List of String) — DNS server IPs.
+- `resolved_ips_for_hostname` (List of String) — IPs that the configured hostname resolves to.
+- `trusted_dhcp_servers_ips` (List of String) — Trusted DHCP server IPs.
+- `trusted_egress_ips` (List of String) — Trusted egress IPs.
+- `trusted_gateway_ips` (List of String) — Trusted default-gateway IPs.
+- `trusted_subnet_ips` (List of String) — Trusted CIDR ranges.

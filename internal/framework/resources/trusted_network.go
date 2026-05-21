@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
@@ -9,14 +10,14 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/planmodifier"
-	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringdefault"
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
-	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network"
+	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network_v2"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
 )
 
 var (
@@ -33,19 +34,38 @@ type TrustedNetworkResource struct {
 	client *client.Client
 }
 
+// TrustedNetworkResourceModel mirrors the user-configurable subset of
+// trusted_network_v2.TrustedNetworkV2.
+//
+// Pure server-side metadata — companyId, createdBy, editedBy, guid — is
+// intentionally NOT carried on the resource so it can't show up as
+// HCL-configurable in completions or in `terraform plan`. Consumers that
+// need to read those fields should use the `zcc_trusted_network` data
+// source.
+//
+// Type notes:
+//   - id is a string at the TF boundary (Terraform convention) even
+//     though the SDK uses int; conversion happens via strconv.
+//   - The "...IPs" / "...Domains" fields are List(String) — that's what
+//     the v2 API exchanges on the wire.
+//   - hostname and ssid are single strings (the v2 SDK types them as
+//     scalars, not arrays).
+//   - condition_type is a string ("ALL"/"ANY" or "0"/"1" per the API).
 type TrustedNetworkResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
-	NetworkName            types.String `tfsdk:"network_name"`
+	ZPAID                  types.String `tfsdk:"zpa_id"`
 	Active                 types.Bool   `tfsdk:"active"`
-	ConditionType          types.Int64  `tfsdk:"condition_type"`
-	DnsSearchDomains       types.String `tfsdk:"dns_search_domains"`
-	DnsServers             types.String `tfsdk:"dns_servers"`
-	Guid                   types.String `tfsdk:"guid"`
-	Hostnames              types.String `tfsdk:"hostnames"`
-	ResolvedIpsForHostname types.String `tfsdk:"resolved_ips_for_hostname"`
-	TrustedDhcpServers     types.String `tfsdk:"trusted_dhcp_servers"`
-	TrustedGateways        types.String `tfsdk:"trusted_gateways"`
-	TrustedSubnets         types.String `tfsdk:"trusted_subnets"`
+	ConditionType          types.String `tfsdk:"condition_type"`
+	Name                   types.String `tfsdk:"name"`
+	Hostname               types.String `tfsdk:"hostname"`
+	SSID                   types.String `tfsdk:"ssid"`
+	DNSSearchDomains       types.List   `tfsdk:"dns_search_domains"`
+	DNSServerIPs           types.List   `tfsdk:"dns_server_ips"`
+	ResolvedIPsForHostname types.List   `tfsdk:"resolved_ips_for_hostname"`
+	TrustedDhcpServersIPs  types.List   `tfsdk:"trusted_dhcp_servers_ips"`
+	TrustedEgressIPs       types.List   `tfsdk:"trusted_egress_ips"`
+	TrustedGatewayIPs      types.List   `tfsdk:"trusted_gateway_ips"`
+	TrustedSubnetIPs       types.List   `tfsdk:"trusted_subnet_ips"`
 }
 
 func (r *TrustedNetworkResource) Metadata(ctx context.Context, req resource.MetadataRequest, resp *resource.MetadataResponse) {
@@ -53,79 +73,61 @@ func (r *TrustedNetworkResource) Metadata(ctx context.Context, req resource.Meta
 }
 
 func (r *TrustedNetworkResource) Schema(ctx context.Context, req resource.SchemaRequest, resp *resource.SchemaResponse) {
+	stringListOC := func(desc string) schema.Attribute {
+		return schema.ListAttribute{
+			ElementType: types.StringType,
+			Optional:    true,
+			Computed:    true,
+			Description: desc,
+		}
+	}
 	resp.Schema = schema.Schema{
-		Description: "Manages ZCC trusted networks. The ZCC API requires all criteria " +
-			"fields to be present in every create/update request. Fields that are " +
-			"not set default to an empty string.",
+		Description: "Manages a ZCC trusted network via the /zcc/papi/public/v2/trusted-networks endpoint. " +
+			"The IP/domain criteria fields are List(String) on this resource (the v1 comma-separated string " +
+			"surface is gone); pass `[]` for criteria you do not want to set.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
-				Description: "The unique identifier of the trusted network.",
+				Description: "Numeric identifier of the trusted network, carried as a string per Terraform convention. API field: id (JSON number).",
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
 			},
-			"network_name": schema.StringAttribute{
-				Required:    true,
-				Description: "The name of the trusted network.",
+			"zpa_id": schema.StringAttribute{
+				Computed:    true,
+				Description: "Linked ZPA tenant identifier. API field: zpaId.",
 			},
 			"active": schema.BoolAttribute{
 				Required:    true,
-				Description: "Whether the trusted network is active.",
+				Description: "Whether the trusted network is active. API field: active.",
 			},
-			"condition_type": schema.Int64Attribute{
+			"condition_type": schema.StringAttribute{
 				Required:    true,
-				Description: "The condition type (0 = match all, 1 = match any).",
+				Description: "Match policy applied across the criteria below. The API accepts `ALL`/`ANY` (or the numeric forms `0`/`1`). API field: conditionType.",
 			},
-			"dns_search_domains": schema.StringAttribute{
+			"name": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated DNS search domains.",
+				Description: "Server-side name. Most operators only set `network_name`; the API echoes `name` separately. API field: name.",
 			},
-			"dns_servers": schema.StringAttribute{
+
+			"hostname": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated DNS server addresses.",
+				Description: "Hostname used to identify the network. API field: hostname.",
 			},
-			"guid": schema.StringAttribute{
-				Computed:    true,
-				Description: "The GUID of the trusted network.",
-				PlanModifiers: []planmodifier.String{
-					stringplanmodifier.UseStateForUnknown(),
-				},
-			},
-			"hostnames": schema.StringAttribute{
+			"ssid": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated hostnames.",
+				Description: "Wi-Fi SSID the network is identified by. API field: ssid.",
 			},
-			"resolved_ips_for_hostname": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated resolved IPs for hostname.",
-			},
-			"trusted_dhcp_servers": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated trusted DHCP servers.",
-			},
-			"trusted_gateways": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated trusted gateways.",
-			},
-			"trusted_subnets": schema.StringAttribute{
-				Optional:    true,
-				Computed:    true,
-				Default:     stringdefault.StaticString(""),
-				Description: "Comma-separated trusted subnets.",
-			},
+			"dns_search_domains":        stringListOC("DNS search domains. API field: dnsSearchDomains."),
+			"dns_server_ips":            stringListOC("DNS server IPs. API field: dnsServerIps."),
+			"resolved_ips_for_hostname": stringListOC("Resolved IPs for the configured hostnames. API field: resolvedIpsForHostname."),
+			"trusted_dhcp_servers_ips":  stringListOC("Trusted DHCP server IPs. API field: trustedDhcpServersIps."),
+			"trusted_egress_ips":        stringListOC("Trusted egress IPs (NAT/public addresses observed from the network). API field: trustedEgressIps."),
+			"trusted_gateway_ips":       stringListOC("Trusted default-gateway IPs. API field: trustedGatewayIps."),
+			"trusted_subnet_ips":        stringListOC("Trusted CIDR ranges (e.g. \"192.0.2.0/24\"). API field: trustedSubnetIps."),
 		},
 	}
 }
@@ -159,7 +161,7 @@ func (r *TrustedNetworkResource) Create(ctx context.Context, req resource.Create
 
 	tflog.Info(ctx, "Creating ZCC trusted network", map[string]any{"network_name": payload.NetworkName})
 
-	created, _, err := trusted_network.CreateTrustedNetwork(ctx, service, &payload)
+	created, _, err := trusted_network_v2.Create(ctx, service, &payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create trusted network: %v", err))
 		return
@@ -182,15 +184,22 @@ func (r *TrustedNetworkResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
+	id, convErr := strconv.Atoi(state.ID.ValueString())
+	if convErr != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+		return
+	}
+
 	service := r.client.Service
-	net, _, err := trusted_network.GetTrustedNetworkByID(ctx, service, state.ID.ValueString())
+	net, err := trusted_network_v2.Get(ctx, service, id)
 	if err != nil {
-		if respErr, ok := err.(*errorx.ErrorResponse); ok && respErr.IsObjectNotFound() {
-			tflog.Info(ctx, "Removing trusted network from state - no longer exists", map[string]any{"id": state.ID.ValueString()})
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Removing trusted network from state - no longer exists", map[string]any{"id": id})
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read trusted network: %v", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read trusted network %d: %v", id, err))
 		return
 	}
 
@@ -209,20 +218,27 @@ func (r *TrustedNetworkResource) Update(ctx context.Context, req resource.Update
 	if resp.Diagnostics.HasError() {
 		return
 	}
+	var state TrustedNetworkResourceModel
+	resp.Diagnostics.Append(req.State.Get(ctx, &state)...)
+	if resp.Diagnostics.HasError() {
+		return
+	}
+
+	id, convErr := strconv.Atoi(state.ID.ValueString())
+	if convErr != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+		return
+	}
 
 	service := r.client.Service
 	payload := expandTrustedNetwork(&plan)
-	payload.ID = plan.ID.ValueString()
+	payload.ID = id
 
-	if !plan.Guid.IsNull() && !plan.Guid.IsUnknown() {
-		payload.Guid = plan.Guid.ValueString()
-	}
+	tflog.Info(ctx, "Updating ZCC trusted network", map[string]any{"id": id})
 
-	tflog.Info(ctx, "Updating ZCC trusted network", map[string]any{"id": payload.ID})
-
-	updated, _, err := trusted_network.UpdateTrustedNetwork(ctx, service, &payload)
+	updated, _, err := trusted_network_v2.Update(ctx, service, id, &payload)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update trusted network: %v", err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update trusted network %d: %v", id, err))
 		return
 	}
 
@@ -242,13 +258,25 @@ func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.Delete
 		return
 	}
 
+	id, convErr := strconv.Atoi(state.ID.ValueString())
+	if convErr != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+		return
+	}
+
 	service := r.client.Service
-	tflog.Info(ctx, "Deleting ZCC trusted network", map[string]any{"id": state.ID.ValueString()})
-	if _, err := trusted_network.DeleteTrustedNetwork(ctx, service, state.ID.ValueString()); err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete trusted network: %v", err))
+	tflog.Info(ctx, "Deleting ZCC trusted network", map[string]any{"id": id})
+	if _, err := trusted_network_v2.Delete(ctx, service, id); err != nil {
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete trusted network %d: %v", id, err))
 	}
 }
 
+// ImportState supports two shapes:
+//   - `terraform import zcc_trusted_network.this 12345` — numeric id is
+//     written straight into state and the next Read fills the rest.
+//   - `terraform import zcc_trusted_network.this Corp-WiFi` — looked up
+//     by case-insensitive Name through the v2 SDK's GetByName helper,
+//     then the resolved id is written into state.
 func (r *TrustedNetworkResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before importing resources.")
@@ -262,34 +290,37 @@ func (r *TrustedNetworkResource) ImportState(ctx context.Context, req resource.I
 	}
 
 	service := r.client.Service
-	res, _, err := trusted_network.GetMultipleTrustedNetworks(ctx, service, id, "id", nil, nil)
+	net, err := trusted_network_v2.GetByName(ctx, service, id)
 	if err != nil {
-		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Unable to import trusted network: %v", err))
+		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Unable to import trusted network %q: %v", id, err))
 		return
 	}
-	if res != nil && len(res.TrustedNetworkContracts) > 0 {
-		resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue(res.TrustedNetworkContracts[0].ID))...)
-		return
-	}
-	resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Trusted network with identifier '%s' not found", id))
+	resp.Diagnostics.Append(resp.State.SetAttribute(ctx, path.Root("id"), types.StringValue(strconv.Itoa(net.ID)))...)
 }
 
 // ---------------------------------------------------------------------------
 // expand: TF model → SDK struct
 // ---------------------------------------------------------------------------
 
-func expandTrustedNetwork(plan *TrustedNetworkResourceModel) trusted_network.TrustedNetwork {
-	return trusted_network.TrustedNetwork{
-		NetworkName:            plan.NetworkName.ValueString(),
+// expandTrustedNetwork builds a TrustedNetworkV2 from the plan. Lists
+// are materialised via the shared helpers so null/unknown values cleanly
+// become empty []string slices that the SDK will then omit on the wire
+// via the `,omitempty` JSON tag.
+func expandTrustedNetwork(plan *TrustedNetworkResourceModel) trusted_network_v2.TrustedNetworkV2 {
+	return trusted_network_v2.TrustedNetworkV2{
 		Active:                 plan.Active.ValueBool(),
-		ConditionType:          int(plan.ConditionType.ValueInt64()),
-		DnsSearchDomains:       plan.DnsSearchDomains.ValueString(),
-		DnsServers:             plan.DnsServers.ValueString(),
-		Hostnames:              plan.Hostnames.ValueString(),
-		ResolvedIpsForHostname: plan.ResolvedIpsForHostname.ValueString(),
-		TrustedDhcpServers:     plan.TrustedDhcpServers.ValueString(),
-		TrustedGateways:        plan.TrustedGateways.ValueString(),
-		TrustedSubnets:         plan.TrustedSubnets.ValueString(),
+		ConditionType:          plan.ConditionType.ValueString(),
+		ZPAID:                  plan.ZPAID.ValueString(),
+		Name:                   plan.Name.ValueString(),
+		Hostname:               plan.Hostname.ValueString(),
+		SSID:                   plan.SSID.ValueString(),
+		DNSSearchDomains:       helpers.StringListFromList(plan.DNSSearchDomains),
+		DNSServerIPs:           helpers.StringListFromList(plan.DNSServerIPs),
+		ResolvedIPsForHostname: helpers.StringListFromList(plan.ResolvedIPsForHostname),
+		TrustedDhcpServersIPs:  helpers.StringListFromList(plan.TrustedDhcpServersIPs),
+		TrustedEgressIPs:       helpers.StringListFromList(plan.TrustedEgressIPs),
+		TrustedGatewayIPs:      helpers.StringListFromList(plan.TrustedGatewayIPs),
+		TrustedSubnetIPs:       helpers.StringListFromList(plan.TrustedSubnetIPs),
 	}
 }
 
@@ -297,17 +328,23 @@ func expandTrustedNetwork(plan *TrustedNetworkResourceModel) trusted_network.Tru
 // flatten: SDK struct → TF model
 // ---------------------------------------------------------------------------
 
-func flattenTrustedNetwork(tn *trusted_network.TrustedNetwork, model *TrustedNetworkResourceModel) {
-	model.ID = types.StringValue(tn.ID)
-	model.NetworkName = types.StringValue(tn.NetworkName)
+// flattenTrustedNetwork copies the server's authoritative view back into
+// the Terraform model. Computed fields (id, guid, company_id, *_by) are
+// always written; user-set fields are also overwritten so any
+// server-side normalisation flows through to state.
+func flattenTrustedNetwork(tn *trusted_network_v2.TrustedNetworkV2, model *TrustedNetworkResourceModel) {
+	model.ID = types.StringValue(strconv.Itoa(tn.ID))
+	model.ZPAID = types.StringValue(tn.ZPAID)
 	model.Active = types.BoolValue(tn.Active)
-	model.ConditionType = types.Int64Value(int64(tn.ConditionType))
-	model.DnsSearchDomains = types.StringValue(tn.DnsSearchDomains)
-	model.DnsServers = types.StringValue(tn.DnsServers)
-	model.Guid = types.StringValue(tn.Guid)
-	model.Hostnames = types.StringValue(tn.Hostnames)
-	model.ResolvedIpsForHostname = types.StringValue(tn.ResolvedIpsForHostname)
-	model.TrustedDhcpServers = types.StringValue(tn.TrustedDhcpServers)
-	model.TrustedGateways = types.StringValue(tn.TrustedGateways)
-	model.TrustedSubnets = types.StringValue(tn.TrustedSubnets)
+	model.ConditionType = types.StringValue(tn.ConditionType)
+	model.Name = types.StringValue(tn.Name)
+	model.Hostname = types.StringValue(tn.Hostname)
+	model.SSID = types.StringValue(tn.SSID)
+	model.DNSSearchDomains = helpers.StringListValue(tn.DNSSearchDomains)
+	model.DNSServerIPs = helpers.StringListValue(tn.DNSServerIPs)
+	model.ResolvedIPsForHostname = helpers.StringListValue(tn.ResolvedIPsForHostname)
+	model.TrustedDhcpServersIPs = helpers.StringListValue(tn.TrustedDhcpServersIPs)
+	model.TrustedEgressIPs = helpers.StringListValue(tn.TrustedEgressIPs)
+	model.TrustedGatewayIPs = helpers.StringListValue(tn.TrustedGatewayIPs)
+	model.TrustedSubnetIPs = helpers.StringListValue(tn.TrustedSubnetIPs)
 }

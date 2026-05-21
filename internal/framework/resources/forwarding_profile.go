@@ -20,6 +20,7 @@ import (
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/forwarding_profile"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
 )
 
 var (
@@ -166,51 +167,25 @@ type UnifiedTunnelModel struct {
 // ---------------------------------------------------------------------------
 // Boolean utility functions
 // ---------------------------------------------------------------------------
+//
+// The bool/int/string-"0"/"1" adapters used to live in this file. They are
+// now centralised in internal/framework/helpers so every resource that
+// bridges the ZCC API's 0/1 toggles with Plugin Framework types.Bool uses
+// the same implementation. The aliases below keep the existing call sites
+// short and let callers continue to write `boolToInt(plan.Active)` without
+// sprinkling the package qualifier on every site.
 
-func boolToInt(b types.Bool) int {
-	if b.ValueBool() {
-		return 1
-	}
-	return 0
-}
+var (
+	boolToInt      = helpers.BoolToInt
+	intToBool      = helpers.IntToBool
+	string01ToBool = helpers.String01ToBool
+	boolFromAttr   = helpers.BoolFromAttr
+)
 
-func intToBool(i int) types.Bool {
-	return types.BoolValue(i != 0)
-}
-
-func string01ToBool(s string) types.Bool {
-	return types.BoolValue(s == "1")
-}
-
-func boolFromAttr(v attr.Value) bool {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return false
-	}
-	if b, ok := v.(types.Bool); ok {
-		return b.ValueBool()
-	}
-	return false
-}
-
-func intFromAttr(v attr.Value) int {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return 0
-	}
-	if i, ok := v.(types.Int64); ok {
-		return int(i.ValueInt64())
-	}
-	return 0
-}
-
-func stringFromAttr(v attr.Value) string {
-	if v == nil || v.IsNull() || v.IsUnknown() {
-		return ""
-	}
-	if s, ok := v.(types.String); ok {
-		return s.ValueString()
-	}
-	return ""
-}
+var (
+	intFromAttr    = helpers.IntFromAttr
+	stringFromAttr = helpers.StringFromAttr
+)
 
 // ---------------------------------------------------------------------------
 // Resource interface

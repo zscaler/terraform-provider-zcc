@@ -3,14 +3,16 @@ package datasources
 import (
 	"context"
 	"fmt"
+	"strconv"
 
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network"
+	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network_v2"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
 )
 
 var (
@@ -26,23 +28,29 @@ type TrustedNetworkDataSource struct {
 	client *client.Client
 }
 
+// TrustedNetworkDataSourceModel mirrors trusted_network_v2.TrustedNetworkV2
+// in full — unlike the resource, the data source surfaces every field
+// (including the server-side metadata company_id, created_by, edited_by,
+// guid) so callers can introspect networks they did not create.
 type TrustedNetworkDataSourceModel struct {
 	ID                     types.String `tfsdk:"id"`
-	NetworkName            types.String `tfsdk:"network_name"`
+	CompanyID              types.Int64  `tfsdk:"company_id"`
+	ZPAID                  types.String `tfsdk:"zpa_id"`
 	Active                 types.Bool   `tfsdk:"active"`
-	ConditionType          types.Int64  `tfsdk:"condition_type"`
+	ConditionType          types.String `tfsdk:"condition_type"`
+	Name                   types.String `tfsdk:"name"`
 	CreatedBy              types.String `tfsdk:"created_by"`
-	DnsSearchDomains       types.String `tfsdk:"dns_search_domains"`
-	DnsServers             types.String `tfsdk:"dns_servers"`
-	EditBy                 types.String `tfsdk:"edit_by"`
+	EditedBy               types.String `tfsdk:"edited_by"`
 	Guid                   types.String `tfsdk:"guid"`
-	Hostnames              types.String `tfsdk:"hostnames"`
-	ResolvedIpsForHostname types.String `tfsdk:"resolved_ips_for_hostname"`
-	Ssid                   types.String `tfsdk:"ssid"`
-	TrustedDhcpServers     types.String `tfsdk:"trusted_dhcp_servers"`
-	TrustedEgressIps       types.String `tfsdk:"trusted_egress_ips"`
-	TrustedGateways        types.String `tfsdk:"trusted_gateways"`
-	TrustedSubnets         types.String `tfsdk:"trusted_subnets"`
+	Hostname               types.String `tfsdk:"hostname"`
+	SSID                   types.String `tfsdk:"ssid"`
+	DNSSearchDomains       types.List   `tfsdk:"dns_search_domains"`
+	DNSServerIPs           types.List   `tfsdk:"dns_server_ips"`
+	ResolvedIPsForHostname types.List   `tfsdk:"resolved_ips_for_hostname"`
+	TrustedDhcpServersIPs  types.List   `tfsdk:"trusted_dhcp_servers_ips"`
+	TrustedEgressIPs       types.List   `tfsdk:"trusted_egress_ips"`
+	TrustedGatewayIPs      types.List   `tfsdk:"trusted_gateway_ips"`
+	TrustedSubnetIPs       types.List   `tfsdk:"trusted_subnet_ips"`
 }
 
 func (d *TrustedNetworkDataSource) Metadata(ctx context.Context, req datasource.MetadataRequest, resp *datasource.MetadataResponse) {
@@ -50,76 +58,68 @@ func (d *TrustedNetworkDataSource) Metadata(ctx context.Context, req datasource.
 }
 
 func (d *TrustedNetworkDataSource) Schema(ctx context.Context, req datasource.SchemaRequest, resp *datasource.SchemaResponse) {
+	stringList := func(desc string) schema.Attribute {
+		return schema.ListAttribute{
+			ElementType: types.StringType,
+			Computed:    true,
+			Description: desc,
+		}
+	}
 	resp.Schema = schema.Schema{
-		Description: "Retrieves a ZCC trusted network by ID or network name.",
+		Description: "Retrieves a ZCC trusted network from the /zcc/papi/public/v2/trusted-networks endpoint, by numeric id or by network name.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "The unique identifier of the trusted network.",
+				Description: "Numeric identifier of the trusted network (carried as a string). Either id or network_name must be set.",
 				Optional:    true,
 				Computed:    true,
 			},
-			"network_name": schema.StringAttribute{
-				Description: "The name of the trusted network.",
-				Optional:    true,
+			"company_id": schema.Int64Attribute{
+				Description: "Numeric company id the network is scoped to.",
+				Computed:    true,
+			},
+			"zpa_id": schema.StringAttribute{
+				Description: "Linked ZPA tenant identifier.",
 				Computed:    true,
 			},
 			"active": schema.BoolAttribute{
 				Description: "Whether the trusted network is active.",
 				Computed:    true,
 			},
-			"condition_type": schema.Int64Attribute{
-				Description: "Condition type code from the API (`0` and `1` are both valid).",
+			"condition_type": schema.StringAttribute{
+				Description: "Match policy applied across the criteria (`ALL`/`ANY` or the numeric forms `0`/`1`).",
+				Computed:    true,
+			},
+			"name": schema.StringAttribute{
+				Description: "Server-side name (distinct from network_name on the v2 contract).",
 				Computed:    true,
 			},
 			"created_by": schema.StringAttribute{
 				Description: "User who created the trusted network.",
 				Computed:    true,
 			},
-			"dns_search_domains": schema.StringAttribute{
-				Description: "DNS search domains.",
-				Optional:    true,
-				Computed:    true,
-			},
-			"dns_servers": schema.StringAttribute{
-				Description: "DNS servers.",
-				Computed:    true,
-			},
-			"edit_by": schema.StringAttribute{
+			"edited_by": schema.StringAttribute{
 				Description: "User who last edited the trusted network.",
 				Computed:    true,
 			},
 			"guid": schema.StringAttribute{
-				Description: "GUID of the trusted network.",
+				Description: "Stable GUID of the trusted network.",
 				Computed:    true,
 			},
-			"hostnames": schema.StringAttribute{
-				Description: "Hostnames associated with the trusted network.",
-				Computed:    true,
-			},
-			"resolved_ips_for_hostname": schema.StringAttribute{
-				Description: "Resolved IPs for hostname.",
+			"hostname": schema.StringAttribute{
+				Description: "Hostname used to identify the network.",
 				Computed:    true,
 			},
 			"ssid": schema.StringAttribute{
-				Description: "SSIDs associated with the trusted network.",
+				Description: "Wi-Fi SSID the network is identified by.",
 				Computed:    true,
 			},
-			"trusted_dhcp_servers": schema.StringAttribute{
-				Description: "Trusted DHCP servers.",
-				Computed:    true,
-			},
-			"trusted_egress_ips": schema.StringAttribute{
-				Description: "Trusted egress IPs.",
-				Computed:    true,
-			},
-			"trusted_gateways": schema.StringAttribute{
-				Description: "Trusted gateways.",
-				Computed:    true,
-			},
-			"trusted_subnets": schema.StringAttribute{
-				Description: "Trusted subnets.",
-				Computed:    true,
-			},
+			"dns_search_domains":        stringList("DNS search domains."),
+			"dns_server_ips":            stringList("DNS server IPs."),
+			"resolved_ips_for_hostname": stringList("Resolved IPs for the configured hostnames."),
+			"trusted_dhcp_servers_ips":  stringList("Trusted DHCP server IPs."),
+			"trusted_egress_ips":        stringList("Trusted egress IPs."),
+			"trusted_gateway_ips":       stringList("Trusted default-gateway IPs."),
+			"trusted_subnet_ips":        stringList("Trusted CIDR ranges."),
 		},
 	}
 }
@@ -148,7 +148,9 @@ func (d *TrustedNetworkDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	if (data.ID.IsNull() || data.ID.ValueString() == "") && (data.NetworkName.IsNull() || data.NetworkName.ValueString() == "") {
+	hasID := !data.ID.IsNull() && data.ID.ValueString() != ""
+	hasName := !data.Name.IsNull() && data.Name.ValueString() != ""
+	if !hasID && !hasName {
 		resp.Diagnostics.AddError("Missing Identifier", "Either id or network_name must be specified")
 		return
 	}
@@ -156,18 +158,23 @@ func (d *TrustedNetworkDataSource) Read(ctx context.Context, req datasource.Read
 	service := d.client.Service
 
 	var (
-		net *trusted_network.TrustedNetwork
+		net *trusted_network_v2.TrustedNetworkV2
 		err error
 	)
 
-	if !data.ID.IsNull() && data.ID.ValueString() != "" {
-		id := data.ID.ValueString()
+	if hasID {
+		idStr := data.ID.ValueString()
+		id, convErr := strconv.Atoi(idStr)
+		if convErr != nil {
+			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", idStr, convErr))
+			return
+		}
 		tflog.Info(ctx, "Fetching trusted network", map[string]any{"id": id})
-		net, _, err = trusted_network.GetTrustedNetworkByID(ctx, service, id)
+		net, err = trusted_network_v2.Get(ctx, service, id)
 	} else {
-		name := data.NetworkName.ValueString()
+		name := data.Name.ValueString()
 		tflog.Info(ctx, "Fetching trusted network", map[string]any{"network_name": name})
-		net, _, err = trusted_network.GetTrustedNetworkByName(ctx, service, name)
+		net, err = trusted_network_v2.GetByName(ctx, service, name)
 	}
 
 	if err != nil {
@@ -176,22 +183,24 @@ func (d *TrustedNetworkDataSource) Read(ctx context.Context, req datasource.Read
 	}
 
 	model := TrustedNetworkDataSourceModel{
-		ID:                     types.StringValue(net.ID),
-		NetworkName:            types.StringValue(net.NetworkName),
+		ID:                     types.StringValue(strconv.Itoa(net.ID)),
+		CompanyID:              types.Int64Value(int64(net.CompanyID)),
+		ZPAID:                  types.StringValue(net.ZPAID),
 		Active:                 types.BoolValue(net.Active),
-		ConditionType:          types.Int64Value(int64(net.ConditionType)),
+		ConditionType:          types.StringValue(net.ConditionType),
+		Name:                   types.StringValue(net.Name),
 		CreatedBy:              types.StringValue(net.CreatedBy),
-		DnsSearchDomains:       types.StringValue(net.DnsSearchDomains),
-		DnsServers:             types.StringValue(net.DnsServers),
-		EditBy:                 types.StringValue(net.EditedBy),
+		EditedBy:               types.StringValue(net.EditedBy),
 		Guid:                   types.StringValue(net.Guid),
-		Hostnames:              types.StringValue(net.Hostnames),
-		ResolvedIpsForHostname: types.StringValue(net.ResolvedIpsForHostname),
-		Ssid:                   types.StringValue(net.Ssids),
-		TrustedDhcpServers:     types.StringValue(net.TrustedDhcpServers),
-		TrustedEgressIps:       types.StringValue(net.TrustedEgressIps),
-		TrustedGateways:        types.StringValue(net.TrustedGateways),
-		TrustedSubnets:         types.StringValue(net.TrustedSubnets),
+		Hostname:               types.StringValue(net.Hostname),
+		SSID:                   types.StringValue(net.SSID),
+		DNSSearchDomains:       helpers.StringListValue(net.DNSSearchDomains),
+		DNSServerIPs:           helpers.StringListValue(net.DNSServerIPs),
+		ResolvedIPsForHostname: helpers.StringListValue(net.ResolvedIPsForHostname),
+		TrustedDhcpServersIPs:  helpers.StringListValue(net.TrustedDhcpServersIPs),
+		TrustedEgressIPs:       helpers.StringListValue(net.TrustedEgressIPs),
+		TrustedGatewayIPs:      helpers.StringListValue(net.TrustedGatewayIPs),
+		TrustedSubnetIPs:       helpers.StringListValue(net.TrustedSubnetIPs),
 	}
 
 	resp.Diagnostics.Append(resp.State.Set(ctx, &model)...)

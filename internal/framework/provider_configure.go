@@ -14,6 +14,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/provider"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
+
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
 )
 
@@ -41,10 +42,6 @@ func (p *ZCCProvider) Configure(ctx context.Context, req provider.ConfigureReque
 		PrivateKey:       getStringValue(data.PrivateKey, "ZSCALER_PRIVATE_KEY"),
 		VanityDomain:     getStringValue(data.VanityDomain, "ZSCALER_VANITY_DOMAIN"),
 		Cloud:            getStringValue(data.ZscalerCloud, "ZSCALER_CLOUD"),
-		ZCCClientID:      getStringValue(data.ZCCClientID, "ZCC_CLIENT_ID"),
-		ZCCClientSecret:  getStringValue(data.ZCCClientSecret, "ZCC_CLIENT_SECRET"),
-		ZCCCloud:         getStringValue(data.ZCCCloud, "ZCC_CLOUD"),
-		UseLegacyClient:  getBoolValue(data.UseLegacyClient, "ZSCALER_USE_LEGACY_CLIENT"),
 		HTTPProxy:        getStringValue(data.HTTPProxy, "ZSCALER_HTTP_PROXY"),
 		RetryCount:       getIntValue(data.MaxRetries, 100),
 		RequestTimeout:   getIntValue(data.RequestTimeout, 240),
@@ -75,14 +72,6 @@ func getStringValue(value types.String, envVar string) string {
 		return value.ValueString()
 	}
 	return os.Getenv(envVar)
-}
-
-func getBoolValue(value types.Bool, envVar string) bool {
-	if !value.IsNull() && !value.IsUnknown() {
-		return value.ValueBool()
-	}
-	envValue := os.Getenv(envVar)
-	return strings.ToLower(envValue) == "true"
 }
 
 func getIntValue(value types.Int64, defaultValue int) int {

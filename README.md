@@ -3,6 +3,7 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/zscaler/terraform-provider-zcc)](https://goreportcard.com/report/github.com/zscaler/terraform-provider-zcc)
 [![codecov](https://codecov.io/gh/zscaler/terraform-provider-zcc/graph/badge.svg?token=7YX2V2LV8H)](https://codecov.io/gh/zscaler/terraform-provider-zcc)
 [![License](https://img.shields.io/github/license/zscaler/terraform-provider-zcc?color=blue)](https://github.com/zscaler/terraform-provider-zcc/v2/blob/master/LICENSE)
+[![Automation Hub](https://img.shields.io/badge/automation-hub-blue)](https://automate.zscaler.com/docs/tools/sdk-documentation/sdk-getting-started)
 [![Zscaler Community](https://img.shields.io/badge/zscaler-community-blue)](https://community.zscaler.com/)
 
 <a href="https://terraform.io">
@@ -19,6 +20,7 @@ Terraform Provider for ☁️Zscaler Private Access☁️
 - [Website](https://registry.terraform.io/providers/zscaler/zcc/latest)
 - [Documentation](https://automate.zscaler.com/docs/docs/api-reference-and-guides/api-reference/zcc)
 - [Zscaler Community](https://community.zscaler.com)
+- [Automation Hub](https://automate.zscaler.com/docs/tools/sdk-documentation/sdk-getting-started)
 
 ## Support Disclaimer
 
@@ -188,7 +190,7 @@ MIT License
 
 =======
 
-Copyright (c) 2022 [Zscaler](https://github.com/zscaler)
+Copyright (c) 2026 [Zscaler](https://github.com/zscaler)
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,15 +1,13 @@
-terraform {
-  required_providers {
-    zcc = {
-      source  = "zscaler/zcc"
-      version = "~> 0.1.0"
-    }
-  }
-}
+resource "zcc_web_app_service" "office365" {
+  app_name = "Office 365"
+  active   = true
 
-provider "zcc" {}
-
-# app_name must match an existing ZCC web app service (bypass app) in your tenant.
-resource "zcc_web_app_service" "example" {
-  app_name = "ExampleBypassApp"
+  app_data_blob = [
+    {
+      proto  = "TCP"
+      port   = "443"
+      ipaddr = "13.107.6.152/31"
+      fqdn   = "*.office.com"
+    },
+  ]
 }

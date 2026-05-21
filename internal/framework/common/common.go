@@ -40,6 +40,8 @@ import (
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
 	zccCommon "github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/common"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/web_policy"
+
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
 )
 
 // =============================================================================
@@ -131,7 +133,7 @@ func WebPolicyBaseAttributes() map[string]schema.Attribute {
 		"name":        schema.StringAttribute{Description: "Display name of the policy.", Required: true},
 		"description": stringOC("Free-form description of the policy."),
 		"device_type": schema.StringAttribute{
-			Description: "Friendly device type label (e.g. \"Windows\", \"macOS\") derived from the numeric device_type the API uses. Set automatically by the resource — do not configure manually.",
+			Description: "Friendly device type label (\"iOS\", \"Android\", \"Windows\", \"macOS\", \"Linux\") corresponding to the numeric device_type the ZCC API uses. The value is HARD-CODED per resource (zcc_app_profile_macos = macOS, zcc_app_profile_ios = iOS, etc.) — operators do NOT configure this attribute, and the schema enforces that by exposing it as Computed-only.",
 			Computed:    true,
 			PlanModifiers: []planmodifier.String{
 				stringplanmodifier.UseStateForUnknown(),
@@ -371,6 +373,17 @@ func FlattenDisasterRecovery(dr web_policy.DisasterRecovery) types.Object {
 // between the SDK struct and the Plugin Framework value. Centralising the
 // list keeps the schema, the attr.Type map and the runtime expand/flatten
 // logic in lock-step — a new SDK field only needs a single new entry here.
+// policyExtensionStringFields lists the policy_extension attributes that
+// are genuine strings on the wire — passwords, comma-separated CIDR
+// lists, JSON blobs, configuration paths, etc. The getter/setter
+// closure bridges the Terraform StringAttribute with the SDK field's
+// Go type (always `string` for these entries).
+//
+// Boolean-shaped fields ("0"/"1" toggles) live in
+// policyExtensionBoolFields below so they can be surfaced to HCL as
+// types.Bool rather than types.String — much friendlier for operators
+// who otherwise had to remember "is it 0 or 1 for on?". The expand /
+// flatten loops in this file iterate BOTH registries.
 var policyExtensionStringFields = []struct {
 	name string
 	get  func(p *web_policy.PolicyExtension) string
@@ -378,12 +391,55 @@ var policyExtensionStringFields = []struct {
 }{
 	{"custom_dns", func(p *web_policy.PolicyExtension) string { return p.CustomDNS }, func(p *web_policy.PolicyExtension, v string) { p.CustomDNS = v }},
 	{"ddil_config", func(p *web_policy.PolicyExtension) string { return p.DdilConfig }, func(p *web_policy.PolicyExtension, v string) { p.DdilConfig = v }},
+	// delete_dhcp_option121_routes is a JSON-encoded blob keyed by
+	// trust posture (trusted / offTrusted / vpnTrusted / splitVpnTrusted),
+	// NOT a "0"/"1" toggle — keep it as a StringAttribute.
 	{"delete_dhcp_option121_routes", func(p *web_policy.PolicyExtension) string { return p.DeleteDHCPOption121Routes }, func(p *web_policy.PolicyExtension, v string) { p.DeleteDHCPOption121Routes = v }},
-	// disable_dns_route_exclusion through zpa_auth_exp_on_win_session_lock are
-	// IntOrString on the wire — the SDK marshals them as JSON numbers, but the
-	// provider continues to surface them as Optional/Computed StringAttributes.
-	// The intOrStringField* adapters bridge the schema's string view with the
-	// SDK's numeric storage.
+	{"exit_password", func(p *web_policy.PolicyExtension) string { return p.ExitPassword }, func(p *web_policy.PolicyExtension, v string) { p.ExitPassword = v }},
+	{"nonce", func(p *web_policy.PolicyExtension) string { return p.Nonce }, func(p *web_policy.PolicyExtension, v string) { p.Nonce = v }},
+	{"packet_tunnel_dns_exclude_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelDnsExcludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelDnsExcludeList = v }},
+	{"packet_tunnel_dns_include_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelDnsIncludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelDnsIncludeList = v }},
+	// pcAdditionalSpace is a quoted-number string on the wire (e.g. "512"),
+	// not a true integer — the UI capture surfaces it as "512" / "1024".
+	// Keep it as a StringAttribute so the operator can pass the exact
+	// label-value pair the API expects.
+	{"pc_additional_space", func(p *web_policy.PolicyExtension) string { return p.PcAdditionalSpace }, func(p *web_policy.PolicyExtension, v string) { p.PcAdditionalSpace = v }},
+	{"packet_tunnel_exclude_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelExcludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelExcludeList = v }},
+	{"packet_tunnel_exclude_list_for_ipv6", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelExcludeListForIPv6 }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelExcludeListForIPv6 = v }},
+	{"packet_tunnel_include_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelIncludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelIncludeList = v }},
+	{"packet_tunnel_include_list_for_ipv6", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelIncludeListForIPv6 }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelIncludeListForIPv6 = v }},
+	{"partner_domains", func(p *web_policy.PolicyExtension) string { return p.PartnerDomains }, func(p *web_policy.PolicyExtension, v string) { p.PartnerDomains = v }},
+	{"source_port_based_bypasses", func(p *web_policy.PolicyExtension) string { return p.SourcePortBasedBypasses }, func(p *web_policy.PolicyExtension, v string) { p.SourcePortBasedBypasses = v }},
+	{"vpn_gateways", func(p *web_policy.PolicyExtension) string { return p.VpnGateways }, func(p *web_policy.PolicyExtension, v string) { p.VpnGateways = v }},
+	{"zcc_fail_close_settings_exit_uninstall_password", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsExitUninstallPassword }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsExitUninstallPassword = v }},
+	{"zcc_fail_close_settings_ip_bypasses", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsIpBypasses }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsIpBypasses = v }},
+	{"zcc_fail_close_settings_thumb_print", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsThumbPrint }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsThumbPrint = v }},
+	{"zcc_revert_password", func(p *web_policy.PolicyExtension) string { return p.ZccRevertPassword }, func(p *web_policy.PolicyExtension, v string) { p.ZccRevertPassword = v }},
+	{"zd_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdDisablePassword = v }},
+	{"zdp_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdpDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdpDisablePassword = v }},
+	{"zdx_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdxDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdxDisablePassword = v }},
+	{"zdx_lite_config_obj", func(p *web_policy.PolicyExtension) string { return p.ZdxLiteConfigObj }, func(p *web_policy.PolicyExtension, v string) { p.ZdxLiteConfigObj = v }},
+	{"zpa_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZpaDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZpaDisablePassword = v }},
+}
+
+// policyExtensionBoolFields lists the policy_extension attributes that
+// look like genuine on/off toggles on the wire — the ZCC API echoes
+// them back as "0" / "1" (or as a JSON number 0/1 for the
+// common.IntOrString-typed entries). The getter / setter on each
+// entry continues to deal in the SDK's native shape — string or
+// IntOrString through intOrStringFieldToString/FromString — and the
+// expand/flatten loops on these entries bridge to types.Bool at the
+// framework boundary via helpers.BoolToString01 / helpers.String01ToBool.
+//
+// Moving a field out of policyExtensionStringFields into this list is
+// the only change required to switch its HCL surface from "1" / "0"
+// string to true / false bool; the SDK struct and the wire shape are
+// untouched.
+var policyExtensionBoolFields = []struct {
+	name string
+	get  func(p *web_policy.PolicyExtension) string
+	set  func(p *web_policy.PolicyExtension, v string)
+}{
 	{"disable_dns_route_exclusion", func(p *web_policy.PolicyExtension) string {
 		return intOrStringFieldToString(p.DisableDNSRouteExclusion)
 	}, func(p *web_policy.PolicyExtension, v string) {
@@ -395,7 +451,6 @@ var policyExtensionStringFields = []struct {
 	{"enable_zcc_revert", func(p *web_policy.PolicyExtension) string { return p.EnableZCCRevert }, func(p *web_policy.PolicyExtension, v string) { p.EnableZCCRevert = v }},
 	{"enable_zdp_service", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.EnableZdpService) }, func(p *web_policy.PolicyExtension, v string) { p.EnableZdpService = intOrStringFieldFromString(v) }},
 	{"enforce_split_dns", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.EnforceSplitDNS) }, func(p *web_policy.PolicyExtension, v string) { p.EnforceSplitDNS = intOrStringFieldFromString(v) }},
-	{"exit_password", func(p *web_policy.PolicyExtension) string { return p.ExitPassword }, func(p *web_policy.PolicyExtension, v string) { p.ExitPassword = v }},
 	{"fallback_to_gateway_domain", func(p *web_policy.PolicyExtension) string { return p.FallbackToGatewayDomain }, func(p *web_policy.PolicyExtension, v string) { p.FallbackToGatewayDomain = v }},
 	{"follow_global_for_partner_login", func(p *web_policy.PolicyExtension) string { return p.FollowGlobalForPartnerLogin }, func(p *web_policy.PolicyExtension, v string) { p.FollowGlobalForPartnerLogin = v }},
 	{"follow_routing_table", func(p *web_policy.PolicyExtension) string { return p.FollowRoutingTable }, func(p *web_policy.PolicyExtension, v string) { p.FollowRoutingTable = v }},
@@ -404,15 +459,9 @@ var policyExtensionStringFields = []struct {
 	}, func(p *web_policy.PolicyExtension, v string) {
 		p.InterceptZIATrafficAllAdapters = intOrStringFieldFromString(v)
 	}},
-	{"nonce", func(p *web_policy.PolicyExtension) string { return p.Nonce }, func(p *web_policy.PolicyExtension, v string) { p.Nonce = v }},
-	{"override_at_cmd_by_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.OverrideATCmdByPolicy) }, func(p *web_policy.PolicyExtension, v string) { p.OverrideATCmdByPolicy = intOrStringFieldFromString(v) }},
-	{"packet_tunnel_dns_exclude_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelDnsExcludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelDnsExcludeList = v }},
-	{"packet_tunnel_dns_include_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelDnsIncludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelDnsIncludeList = v }},
-	{"packet_tunnel_exclude_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelExcludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelExcludeList = v }},
-	{"packet_tunnel_exclude_list_for_ipv6", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelExcludeListForIPv6 }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelExcludeListForIPv6 = v }},
-	{"packet_tunnel_include_list", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelIncludeList }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelIncludeList = v }},
-	{"packet_tunnel_include_list_for_ipv6", func(p *web_policy.PolicyExtension) string { return p.PacketTunnelIncludeListForIPv6 }, func(p *web_policy.PolicyExtension, v string) { p.PacketTunnelIncludeListForIPv6 = v }},
-	{"partner_domains", func(p *web_policy.PolicyExtension) string { return p.PartnerDomains }, func(p *web_policy.PolicyExtension, v string) { p.PartnerDomains = v }},
+	{"override_at_cmd_by_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.OverrideATCmdByPolicy) }, func(p *web_policy.PolicyExtension, v string) {
+		p.OverrideATCmdByPolicy = intOrStringFieldFromString(v)
+	}},
 	{"prioritize_dns_exclusions", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.PrioritizeDnsExclusions) }, func(p *web_policy.PolicyExtension, v string) {
 		p.PrioritizeDnsExclusions = intOrStringFieldFromString(v)
 	}},
@@ -421,7 +470,6 @@ var policyExtensionStringFields = []struct {
 	}, func(p *web_policy.PolicyExtension, v string) {
 		p.PurgeKerberosPreferredDCCache = intOrStringFieldFromString(v)
 	}},
-	{"source_port_based_bypasses", func(p *web_policy.PolicyExtension) string { return p.SourcePortBasedBypasses }, func(p *web_policy.PolicyExtension, v string) { p.SourcePortBasedBypasses = v }},
 	{"truncate_large_udp_dns_response", func(p *web_policy.PolicyExtension) string {
 		return intOrStringFieldToString(p.TruncateLargeUDPDNSResponse)
 	}, func(p *web_policy.PolicyExtension, v string) {
@@ -435,22 +483,21 @@ var policyExtensionStringFields = []struct {
 	{"use_wsa_poll_for_zpa", func(p *web_policy.PolicyExtension) string { return p.UseWsaPollForZpa }, func(p *web_policy.PolicyExtension, v string) { p.UseWsaPollForZpa = v }},
 	{"use_zscaler_notification_framework", func(p *web_policy.PolicyExtension) string { return p.UseZscalerNotificationFramework }, func(p *web_policy.PolicyExtension, v string) { p.UseZscalerNotificationFramework = v }},
 	{"user_allowed_to_add_partner", func(p *web_policy.PolicyExtension) string { return p.UserAllowedToAddPartner }, func(p *web_policy.PolicyExtension, v string) { p.UserAllowedToAddPartner = v }},
-	{"vpn_gateways", func(p *web_policy.PolicyExtension) string { return p.VpnGateways }, func(p *web_policy.PolicyExtension, v string) { p.VpnGateways = v }},
-	{"zcc_app_fail_open_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZccAppFailOpenPolicy) }, func(p *web_policy.PolicyExtension, v string) { p.ZccAppFailOpenPolicy = intOrStringFieldFromString(v) }},
-	{"zcc_fail_close_settings_exit_uninstall_password", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsExitUninstallPassword }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsExitUninstallPassword = v }},
-	{"zcc_fail_close_settings_ip_bypasses", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsIpBypasses }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsIpBypasses = v }},
-	{"zcc_fail_close_settings_lockdown_on_tunnel_process_exit", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsLockdownOnTunnelProcessExit }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsLockdownOnTunnelProcessExit = v }},
-	{"zcc_fail_close_settings_thumb_print", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsThumbPrint }, func(p *web_policy.PolicyExtension, v string) { p.ZccFailCloseSettingsThumbPrint = v }},
-	{"zcc_revert_password", func(p *web_policy.PolicyExtension) string { return p.ZccRevertPassword }, func(p *web_policy.PolicyExtension, v string) { p.ZccRevertPassword = v }},
-	{"zcc_tunnel_fail_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZccTunnelFailPolicy) }, func(p *web_policy.PolicyExtension, v string) { p.ZccTunnelFailPolicy = intOrStringFieldFromString(v) }},
-	{"zd_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdDisablePassword = v }},
-	{"zdp_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdpDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdpDisablePassword = v }},
-	{"zdx_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZdxDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZdxDisablePassword = v }},
-	{"zdx_lite_config_obj", func(p *web_policy.PolicyExtension) string { return p.ZdxLiteConfigObj }, func(p *web_policy.PolicyExtension, v string) { p.ZdxLiteConfigObj = v }},
+	{"zcc_app_fail_open_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZccAppFailOpenPolicy) }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZccAppFailOpenPolicy = intOrStringFieldFromString(v)
+	}},
+	{"zcc_fail_close_settings_lockdown_on_tunnel_process_exit", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsLockdownOnTunnelProcessExit }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZccFailCloseSettingsLockdownOnTunnelProcessExit = v
+	}},
+	{"zcc_tunnel_fail_policy", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZccTunnelFailPolicy) }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZccTunnelFailPolicy = intOrStringFieldFromString(v)
+	}},
 	{"zpa_auth_exp_on_net_ip_change", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZpaAuthExpOnNetIpChange) }, func(p *web_policy.PolicyExtension, v string) {
 		p.ZpaAuthExpOnNetIpChange = intOrStringFieldFromString(v)
 	}},
-	{"zpa_auth_exp_on_sleep", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZpaAuthExpOnSleep) }, func(p *web_policy.PolicyExtension, v string) { p.ZpaAuthExpOnSleep = intOrStringFieldFromString(v) }},
+	{"zpa_auth_exp_on_sleep", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZpaAuthExpOnSleep) }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZpaAuthExpOnSleep = intOrStringFieldFromString(v)
+	}},
 	{"zpa_auth_exp_on_sys_restart", func(p *web_policy.PolicyExtension) string { return intOrStringFieldToString(p.ZpaAuthExpOnSysRestart) }, func(p *web_policy.PolicyExtension, v string) {
 		p.ZpaAuthExpOnSysRestart = intOrStringFieldFromString(v)
 	}},
@@ -464,23 +511,103 @@ var policyExtensionStringFields = []struct {
 	}, func(p *web_policy.PolicyExtension, v string) {
 		p.ZpaAuthExpOnWinSessionLock = intOrStringFieldFromString(v)
 	}},
-	{"zpa_disable_password", func(p *web_policy.PolicyExtension) string { return p.ZpaDisablePassword }, func(p *web_policy.PolicyExtension, v string) { p.ZpaDisablePassword = v }},
+
+	// --- Additional 0/1 toggles surfaced from the macOS /web/policy/edit payload ---
+	// All entries below were already present on the SDK PolicyExtension
+	// struct (and the per-OS default constructor seeded sensible values
+	// for them); they just weren't exposed to HCL. They follow the same
+	// "true → "1" on the wire, false → "0"" convention as the rest of the
+	// boolean registry. Fields whose SDK type is common.IntOrString go
+	// through intOrStringField{To,From}String so the wire shape is the
+	// JSON number the API expects on writes.
+	{"follow_global_for_zpa_reauth", func(p *web_policy.PolicyExtension) string { return p.FollowGlobalForZpaReauth }, func(p *web_policy.PolicyExtension, v string) { p.FollowGlobalForZpaReauth = v }},
+	{"follow_global_for_packet_capture", func(p *web_policy.PolicyExtension) string { return p.FollowGlobalForPacketCapture }, func(p *web_policy.PolicyExtension, v string) { p.FollowGlobalForPacketCapture = v }},
+	{"enable_local_packet_capture", func(p *web_policy.PolicyExtension) string { return p.EnableLocalPacketCapture }, func(p *web_policy.PolicyExtension, v string) { p.EnableLocalPacketCapture = v }},
+	{"switch_focus_to_notification", func(p *web_policy.PolicyExtension) string { return p.SwitchFocusToNotification }, func(p *web_policy.PolicyExtension, v string) { p.SwitchFocusToNotification = v }},
+	{"allow_pac_exclusions_only", func(p *web_policy.PolicyExtension) string { return p.AllowPacExclusionsOnly }, func(p *web_policy.PolicyExtension, v string) { p.AllowPacExclusionsOnly = v }},
+	{"instant_force_zpa_reauth_state_update", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.InstantForceZPAReauthStateUpdate)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.InstantForceZPAReauthStateUpdate = intOrStringFieldFromString(v)
+	}},
+	{"enable_flow_based_tunnel", func(p *web_policy.PolicyExtension) string { return p.EnableFlowBasedTunnel }, func(p *web_policy.PolicyExtension, v string) { p.EnableFlowBasedTunnel = v }},
+	{"zcc_fail_close_settings_lockdown_on_firewall_error", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsLockdownOnFirewallError }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZccFailCloseSettingsLockdownOnFirewallError = v
+	}},
+	{"zcc_fail_close_settings_lockdown_on_driver_error", func(p *web_policy.PolicyExtension) string { return p.ZccFailCloseSettingsLockdownOnDriverError }, func(p *web_policy.PolicyExtension, v string) {
+		p.ZccFailCloseSettingsLockdownOnDriverError = v
+	}},
+	{"allow_client_cert_caching_for_web_view2", func(p *web_policy.PolicyExtension) string { return p.AllowClientCertCachingForWebView2 }, func(p *web_policy.PolicyExtension, v string) { p.AllowClientCertCachingForWebView2 = v }},
+	{"show_confirmation_dialog_for_cached_cert", func(p *web_policy.PolicyExtension) string { return p.ShowConfirmationDialogForCachedCert }, func(p *web_policy.PolicyExtension, v string) { p.ShowConfirmationDialogForCachedCert = v }},
+	{"one_id_mt_device_auth_enabled", func(p *web_policy.PolicyExtension) string { return p.OneIdMTDeviceAuthEnabled }, func(p *web_policy.PolicyExtension, v string) { p.OneIdMTDeviceAuthEnabled = v }},
+	{"prevent_auto_reauth_during_device_lock", func(p *web_policy.PolicyExtension) string { return p.PreventAutoReauthDuringDeviceLock }, func(p *web_policy.PolicyExtension, v string) { p.PreventAutoReauthDuringDeviceLock = v }},
+	{"enable_network_traffic_process_mapping", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.EnableNetworkTrafficProcessMapping)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.EnableNetworkTrafficProcessMapping = intOrStringFieldFromString(v)
+	}},
+	{"use_end_point_location_for_dc_selection", func(p *web_policy.PolicyExtension) string { return p.UseEndPointLocationForDCSelection }, func(p *web_policy.PolicyExtension, v string) { p.UseEndPointLocationForDCSelection = v }},
+	{"recache_system_proxy", func(p *web_policy.PolicyExtension) string { return p.RecacheSystemProxy }, func(p *web_policy.PolicyExtension, v string) { p.RecacheSystemProxy = v }},
+	{"enable_location_policy_override", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.EnableLocationPolicyOverride)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.EnableLocationPolicyOverride = intOrStringFieldFromString(v)
+	}},
+	{"block_private_relay", func(p *web_policy.PolicyExtension) string { return p.BlockPrivateRelay }, func(p *web_policy.PolicyExtension, v string) { p.BlockPrivateRelay = v }},
+	{"enable_automatic_packet_capture", func(p *web_policy.PolicyExtension) string { return p.EnableAutomaticPacketCapture }, func(p *web_policy.PolicyExtension, v string) { p.EnableAutomaticPacketCapture = v }},
+	{"enable_apc_for_critical_sections", func(p *web_policy.PolicyExtension) string { return p.EnableAPCforCriticalSections }, func(p *web_policy.PolicyExtension, v string) { p.EnableAPCforCriticalSections = v }},
+	{"enable_apc_for_other_sections", func(p *web_policy.PolicyExtension) string { return p.EnableAPCforOtherSections }, func(p *web_policy.PolicyExtension, v string) { p.EnableAPCforOtherSections = v }},
+	{"enable_pc_additional_space", func(p *web_policy.PolicyExtension) string { return p.EnablePCAdditionalSpace }, func(p *web_policy.PolicyExtension, v string) { p.EnablePCAdditionalSpace = v }},
+	{"enable_custom_proxy_detection", func(p *web_policy.PolicyExtension) string { return p.EnableCustomProxyDetection }, func(p *web_policy.PolicyExtension, v string) { p.EnableCustomProxyDetection = v }},
+	{"enable_crash_reporting", func(p *web_policy.PolicyExtension) string { return p.EnableCrashReporting }, func(p *web_policy.PolicyExtension, v string) { p.EnableCrashReporting = v }},
+	{"bypass_dns_traffic_using_udp_proxy", func(p *web_policy.PolicyExtension) string { return p.BypassDNSTrafficUsingUDPProxy }, func(p *web_policy.PolicyExtension, v string) { p.BypassDNSTrafficUsingUDPProxy = v }},
+	{"reconnect_tun_on_wakeup", func(p *web_policy.PolicyExtension) string { return p.ReconnectTunOnWakeup }, func(p *web_policy.PolicyExtension, v string) { p.ReconnectTunOnWakeup = v }},
+	{"rsc_mode_on_all_adapters", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.RscModeOnAllAdapters)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.RscModeOnAllAdapters = intOrStringFieldFromString(v)
+	}},
+	{"enable_adapter_hardware_offloading", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.EnableAdapterHardwareOffloading)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.EnableAdapterHardwareOffloading = intOrStringFieldFromString(v)
+	}},
+	{"support_zpa_search_domains_in_trp", func(p *web_policy.PolicyExtension) string {
+		return intOrStringFieldToString(p.SupportZPASearchDomainsInTRP)
+	}, func(p *web_policy.PolicyExtension, v string) {
+		p.SupportZPASearchDomainsInTRP = intOrStringFieldFromString(v)
+	}},
 }
 
 // PolicyExtensionAttrTypes returns the attr.Type map for the
-// policy_extension nested object: every string field declared in
-// policyExtensionStringFields, plus the small handful of typed scalars,
-// list fields, and the nested generate_cli_password_contract object.
+// policy_extension nested object. It aggregates three registries:
+//
+//   - policyExtensionStringFields  → types.StringType
+//   - policyExtensionBoolFields    → types.BoolType (0/1 toggles)
+//
+// plus the small handful of typed scalars, list fields, and the nested
+// generate_cli_password_contract object.
 func PolicyExtensionAttrTypes() map[string]attr.Type {
-	out := make(map[string]attr.Type, len(policyExtensionStringFields)+5)
+	out := make(map[string]attr.Type, len(policyExtensionStringFields)+len(policyExtensionBoolFields)+8)
 	for _, f := range policyExtensionStringFields {
 		out[f.name] = types.StringType
+	}
+	for _, f := range policyExtensionBoolFields {
+		out[f.name] = types.BoolType
 	}
 	out["advance_zpa_reauth"] = types.BoolType
 	out["advance_zpa_reauth_time"] = types.Int64Type
 	out["machine_idp_auth"] = types.BoolType
 	out["reactivate_anti_tampering_time"] = types.Int64Type
 	out["zpa_auth_exp_session_lock_state_min_time_in_second"] = types.Int64Type
+	// Additional scalars surfaced from the macOS payload: numeric timeouts
+	// (IntOrString on the wire), a UI-language picker integer, and the
+	// pair of plain-int 0/1 toggles that don't belong in the string-or-
+	// bool registries above.
+	out["zpa_auto_reauth_timeout"] = types.Int64Type
+	out["client_connector_ui_language"] = types.Int64Type
+	out["enable_local_packet_capture_v2"] = types.BoolType
+	out["enable_custom_theme"] = types.BoolType
 	out["zcc_fail_close_settings_app_by_pass_ids"] = types.ListType{ElemType: types.Int64Type}
 	out["zcc_fail_close_settings_app_by_pass_names"] = types.ListType{ElemType: types.StringType}
 	out["generate_cli_password_contract"] = types.ObjectType{AttrTypes: generateCliPasswordContractAttrTypes()}
@@ -495,18 +622,43 @@ func PolicyExtensionObjectType() attr.Type {
 }
 
 // PolicyExtensionAttributes returns the schema attributes for the
-// policy_extension SingleNestedAttribute, derived from the same field list
-// that drives PolicyExtensionAttrTypes plus the typed and nested entries.
+// policy_extension SingleNestedAttribute. Genuine string fields come
+// from policyExtensionStringFields; 0/1 toggle fields come from
+// policyExtensionBoolFields and are surfaced as BoolAttribute so HCL
+// stays readable (`use_v8_js_engine = true` instead of `= "1"`).
 func PolicyExtensionAttributes() map[string]schema.Attribute {
-	out := make(map[string]schema.Attribute, len(policyExtensionStringFields)+8)
+	out := make(map[string]schema.Attribute, len(policyExtensionStringFields)+len(policyExtensionBoolFields)+8)
 	for _, f := range policyExtensionStringFields {
 		out[f.name] = schema.StringAttribute{Optional: true, Computed: true}
+	}
+	for _, f := range policyExtensionBoolFields {
+		out[f.name] = schema.BoolAttribute{Optional: true, Computed: true}
 	}
 	out["advance_zpa_reauth"] = schema.BoolAttribute{Optional: true, Computed: true}
 	out["advance_zpa_reauth_time"] = schema.Int64Attribute{Optional: true, Computed: true}
 	out["machine_idp_auth"] = schema.BoolAttribute{Optional: true, Computed: true}
 	out["reactivate_anti_tampering_time"] = schema.Int64Attribute{Optional: true, Computed: true}
 	out["zpa_auth_exp_session_lock_state_min_time_in_second"] = schema.Int64Attribute{Optional: true, Computed: true}
+	out["zpa_auto_reauth_timeout"] = schema.Int64Attribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "Timeout in minutes after which ZPA reauth is forced. API field: zpaAutoReauthTimeout.",
+	}
+	out["client_connector_ui_language"] = schema.Int64Attribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "Client Connector UI language code (0 = Use System Language). API field: clientConnectorUiLanguage.",
+	}
+	out["enable_local_packet_capture_v2"] = schema.BoolAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "Enable the v2 local packet capture pipeline. API field: enableLocalPacketCaptureV2 (wire shape: JSON number 0/1).",
+	}
+	out["enable_custom_theme"] = schema.BoolAttribute{
+		Optional:    true,
+		Computed:    true,
+		Description: "Enable the custom ZCC client UI theme. API field: enableCustomTheme (wire shape: JSON number 0/1).",
+	}
 	out["zcc_fail_close_settings_app_by_pass_ids"] = schema.ListAttribute{Optional: true, Computed: true, ElementType: types.Int64Type}
 	out["zcc_fail_close_settings_app_by_pass_names"] = schema.ListAttribute{Optional: true, Computed: true, ElementType: types.StringType}
 	out["generate_cli_password_contract"] = schema.SingleNestedAttribute{
@@ -541,6 +693,18 @@ func ExpandPolicyExtension(obj types.Object, out *web_policy.PolicyExtension) {
 		f.set(out, v.ValueString())
 	}
 
+	// 0/1 toggle fields surfaced to HCL as types.Bool — convert
+	// true/false to the literal "1" / "0" strings the SDK setter
+	// expects (each registry entry routes that string through the
+	// correct String / IntOrString adapter for its backing field).
+	for _, f := range policyExtensionBoolFields {
+		v, ok := a[f.name].(types.Bool)
+		if !ok || v.IsNull() || v.IsUnknown() {
+			continue
+		}
+		f.set(out, helpers.BoolToString01(v))
+	}
+
 	overlayBool(&out.AdvanceZpaReauth, a, "advance_zpa_reauth")
 	overlayInt(&out.AdvanceZpaReauthTime, a, "advance_zpa_reauth_time")
 	overlayBool(&out.MachineIdpAuth, a, "machine_idp_auth")
@@ -552,6 +716,22 @@ func ExpandPolicyExtension(obj types.Object, out *web_policy.PolicyExtension) {
 	// the attribute.
 	if v, ok := a["zpa_auth_exp_session_lock_state_min_time_in_second"].(types.Int64); ok && !v.IsNull() && !v.IsUnknown() {
 		out.ZpaAuthExpSessionLockStateMinTime = strconv.Itoa(int(v.ValueInt64()))
+	}
+
+	// Additional scalars overlaid only when the operator set them in HCL.
+	// IntOrString-backed timeouts wrap the int64 in the dual-shape wire
+	// type; the two plain-int 0/1 toggles round-trip via helpers.
+	if v, ok := a["zpa_auto_reauth_timeout"].(types.Int64); ok && !v.IsNull() && !v.IsUnknown() {
+		out.ZpaAutoReauthTimeout = zccCommon.IntOrString(v.ValueInt64())
+	}
+	if v, ok := a["client_connector_ui_language"].(types.Int64); ok && !v.IsNull() && !v.IsUnknown() {
+		out.ClientConnectorUiLanguage = zccCommon.IntOrString(v.ValueInt64())
+	}
+	if v, ok := a["enable_local_packet_capture_v2"].(types.Bool); ok && !v.IsNull() && !v.IsUnknown() {
+		out.EnableLocalPacketCaptureV2 = helpers.BoolToInt(v)
+	}
+	if v, ok := a["enable_custom_theme"].(types.Bool); ok && !v.IsNull() && !v.IsUnknown() {
+		out.EnableCustomTheme = helpers.BoolToInt(v)
 	}
 
 	overlayIntList(&out.ZccFailCloseSettingsAppByPassIds, a, "zcc_fail_close_settings_app_by_pass_ids")
@@ -566,9 +746,12 @@ func ExpandPolicyExtension(obj types.Object, out *web_policy.PolicyExtension) {
 // by the API into a Plugin Framework types.Object whose AttrTypes match
 // PolicyExtensionAttrTypes.
 func FlattenPolicyExtension(p web_policy.PolicyExtension) types.Object {
-	values := make(map[string]attr.Value, len(policyExtensionStringFields)+8)
+	values := make(map[string]attr.Value, len(policyExtensionStringFields)+len(policyExtensionBoolFields)+8)
 	for _, f := range policyExtensionStringFields {
 		values[f.name] = types.StringValue(f.get(&p))
+	}
+	for _, f := range policyExtensionBoolFields {
+		values[f.name] = helpers.String01ToBool(f.get(&p))
 	}
 	values["advance_zpa_reauth"] = types.BoolValue(p.AdvanceZpaReauth)
 	values["advance_zpa_reauth_time"] = types.Int64Value(int64(p.AdvanceZpaReauthTime))
@@ -576,6 +759,10 @@ func FlattenPolicyExtension(p web_policy.PolicyExtension) types.Object {
 	values["reactivate_anti_tampering_time"] = types.Int64Value(int64(p.ReactivateAntiTamperingTime))
 	zpaAuthExpSessionLockN, _ := strconv.Atoi(p.ZpaAuthExpSessionLockStateMinTime)
 	values["zpa_auth_exp_session_lock_state_min_time_in_second"] = types.Int64Value(int64(zpaAuthExpSessionLockN))
+	values["zpa_auto_reauth_timeout"] = types.Int64Value(int64(p.ZpaAutoReauthTimeout))
+	values["client_connector_ui_language"] = types.Int64Value(int64(p.ClientConnectorUiLanguage))
+	values["enable_local_packet_capture_v2"] = helpers.IntToBool(p.EnableLocalPacketCaptureV2)
+	values["enable_custom_theme"] = helpers.IntToBool(p.EnableCustomTheme)
 	values["zcc_fail_close_settings_app_by_pass_ids"] = intListValue(p.ZccFailCloseSettingsAppByPassIds)
 	values["zcc_fail_close_settings_app_by_pass_names"] = stringListValue(p.ZccFailCloseSettingsAppByPassNames)
 	values["generate_cli_password_contract"] = flattenCliPasswordContract(p.GenerateCliPasswordContract)
@@ -755,6 +942,8 @@ func NewDefaultWebPolicyForDeviceType(deviceType int) web_policy.WebPolicy {
 	switch deviceType {
 	case zccCommon.DeviceTypeMacOS:
 		return web_policy.DefaultMacosWebPolicy()
+	case zccCommon.DeviceTypeIOS:
+		return web_policy.DefaultIosWebPolicy()
 	default:
 		return web_policy.WebPolicy{}
 	}
@@ -764,9 +953,18 @@ func NewDefaultWebPolicyForDeviceType(deviceType int) web_policy.WebPolicy {
 // into the embedded base model. OS-specific blocks are flattened in the
 // calling resource using its own helper.
 //
-// The API returns device_type as a JSON number; the Terraform attribute
-// surfaces it as a friendly label ("Windows", "macOS", etc.) so users
-// don't have to remember the integer code.
+// Note on device_type: the API returns it as a JSON number that this
+// function maps to a friendly label ("iOS", "macOS", ...) for the
+// Terraform state. Each per-OS resource is single-purpose (
+// zcc_app_profile_macos always means deviceType=4, zcc_app_profile_ios
+// always means deviceType=1, etc.), so device_type is NEVER something
+// the operator configures — the schema attribute is Computed-only. To
+// guarantee the state value matches the resource's intent even if the
+// API ever echoes back an unexpected 0 (e.g. via a partial-decode
+// fallback), the shared RunUpsert / RunRead helpers explicitly
+// overwrite base.DeviceType with the friendly label derived from the
+// deviceType passed in by the resource — see the corresponding override
+// at the bottom of those two functions.
 func FlattenWebPolicyBase(p *web_policy.WebPolicy, base *WebPolicyBaseModel) {
 	base.ID = types.StringValue(p.ID)
 	base.Name = types.StringValue(p.Name)
@@ -1033,6 +1231,17 @@ func RunUpsert(
 	FlattenWebPolicyBase(policy, base)
 	flattenOSBlock(policy)
 
+	// device_type is hard-coded per resource (NewAppProfileMacosResource
+	// always operates on deviceType=4, NewAppProfileIosResource on
+	// deviceType=1, and so on). The API echoes the integer back on reads
+	// so FlattenWebPolicyBase derives a friendly label from `p.DeviceType`,
+	// but a partial-decode fallback or a server hiccup can leave that
+	// integer at 0 — which would flip the state's `device_type` to "".
+	// The resource itself is the authoritative source of truth, so we
+	// always overwrite the flattened value with the friendly name
+	// derived from the per-OS const passed in by the resource.
+	base.DeviceType = types.StringValue(zccCommon.GetDeviceTypeName(deviceType))
+
 	if base.Activate.ValueBool() {
 		idInt, convErr := strconv.Atoi(newID)
 		if convErr != nil {
@@ -1090,6 +1299,11 @@ func RunRead(
 	}
 	FlattenWebPolicyBase(policy, base)
 	flattenOSBlock(policy)
+
+	// See the same-named override in RunUpsert: device_type is
+	// hard-coded per resource and is the authoritative source of truth
+	// for the state value, not whatever the API echoed back.
+	base.DeviceType = types.StringValue(zccCommon.GetDeviceTypeName(deviceType))
 	return true, nil
 }
 
