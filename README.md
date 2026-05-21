@@ -14,7 +14,7 @@
     <img src="https://www.zscaler.com/themes/custom/zscaler/logo.svg" alt="Zscaler logo" title="Zscaler" height="50" />
 </a>
 
-Terraform Provider for ☁️Zscaler Private Access☁️
+Terraform Provider for ☁️Zscaler Client Connector☁️
 =========================================================================
 
 - [Website](https://registry.terraform.io/providers/zscaler/zcc/latest)
