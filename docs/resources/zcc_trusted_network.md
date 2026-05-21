@@ -62,7 +62,8 @@ resource "zcc_trusted_network" "corp_office" {
 ### Read-Only
 
 - `id` (String) — Numeric identifier of the trusted network (carried as a string per Terraform convention). API field: `id`.
-- `zpa_id` (String) — Linked ZPA tenant identifier the API returns alongside the trusted network. API field: `zpaId`.
+
+> The API also returns a linked ZPA tenant identifier (`zpaId`) and server-side audit metadata (`companyId`, `createdBy`, `editedBy`, `guid`). These are **not** exposed on this resource — the API populates `zpaId` lazily (the create response omits it but later GETs include it), which makes it unsuitable for resource state. Read those fields from the matching `zcc_trusted_network` **data source** instead.
 
 ## Import
 

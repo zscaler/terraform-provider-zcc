@@ -2,6 +2,7 @@ package resources_test
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-testing/helper/acctest"
 	"github.com/hashicorp/terraform-plugin-testing/helper/resource"
 	"github.com/hashicorp/terraform-plugin-testing/terraform"
+	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network_v2"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
@@ -28,10 +30,27 @@ func TestAccTrustedNetwork_basic(t *testing.T) {
 			{
 				Config: testAccTrustedNetworkConfig(rName),
 				Check: resource.ComposeAggregateTestCheckFunc(
-					resource.TestCheckResourceAttr(resourceName, "network_name", rName),
+					resource.TestCheckResourceAttr(resourceName, "name", rName),
 					resource.TestCheckResourceAttrSet(resourceName, "id"),
-					resource.TestCheckResourceAttr(resourceName, "trusted_subnet_ips.#", "1"),
-					resource.TestCheckResourceAttr(resourceName, "trusted_subnet_ips.0", "192.0.2.0/24"),
+					resource.TestCheckResourceAttr(resourceName, "condition_type", "ALL"),
+					resource.TestCheckResourceAttr(resourceName, "hostname", "www.acme.com"),
+					resource.TestCheckResourceAttr(resourceName, "active", "true"),
+					resource.TestCheckResourceAttr(resourceName, "dns_server_ips.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "dns_server_ips.0", "10.11.12.13"),
+					resource.TestCheckResourceAttr(resourceName, "dns_search_domains.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "dns_search_domains.0", "acme.com"),
+					resource.TestCheckResourceAttr(resourceName, "resolved_ips_for_hostname.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "resolved_ips_for_hostname.0", "20.20.20.20"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_subnet_ips.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_subnet_ips.0", "10.0.0.0/8"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_subnet_ips.1", "20.0.0.0/8"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_gateway_ips.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_gateway_ips.0", "10.0.0.1"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_dhcp_servers_ips.#", "1"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_dhcp_servers_ips.0", "10.0.0.2"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_egress_ips.#", "2"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_egress_ips.0", "10.0.0.3"),
+					resource.TestCheckResourceAttr(resourceName, "trusted_egress_ips.1", "10.0.0.4"),
 				),
 			},
 			{
@@ -43,7 +62,11 @@ func TestAccTrustedNetwork_basic(t *testing.T) {
 				Config: testAccTrustedNetworkWithDataSource(rName),
 				Check: resource.ComposeAggregateTestCheckFunc(
 					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "id", resourceName, "id"),
-					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "network_name", resourceName, "network_name"),
+					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "name", resourceName, "name"),
+					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "condition_type", resourceName, "condition_type"),
+					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "hostname", resourceName, "hostname"),
+					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "trusted_subnet_ips.#", resourceName, "trusted_subnet_ips.#"),
+					resource.TestCheckResourceAttrPair("data.zcc_trusted_network.this", "trusted_egress_ips.#", resourceName, "trusted_egress_ips.#"),
 				),
 			},
 		},
@@ -55,10 +78,17 @@ func testAccTrustedNetworkConfig(name string) string {
 provider "zcc" {}
 
 resource "zcc_trusted_network" "this" {
-  network_name       = %[1]q
-  active             = true
-  condition_type     = "ALL"
-  trusted_subnet_ips = ["192.0.2.0/24"]
+  name       = %[1]q
+  condition_type 			= "ALL"
+  dns_server_ips    		= ["10.11.12.13"]
+  dns_search_domains   		= ["acme.com"]
+  hostname            		= "www.acme.com"
+  trusted_subnet_ips      	= ["10.0.0.0/8", "20.0.0.0/8"]
+  trusted_gateway_ips 		= ["10.0.0.1"]
+  trusted_dhcp_servers_ips 	= ["10.0.0.2"]
+  resolved_ips_for_hostname = [ "20.20.20.20"]
+  trusted_egress_ips 		= ["10.0.0.3", "10.0.0.4"]
+  active 					= true
 }
 `, name)
 }
@@ -68,14 +98,21 @@ func testAccTrustedNetworkWithDataSource(name string) string {
 provider "zcc" {}
 
 resource "zcc_trusted_network" "this" {
-  network_name       = %[1]q
-  active             = true
-  condition_type     = "ALL"
-  trusted_subnet_ips = ["192.0.2.0/24"]
+  name       	            = %[1]q
+  condition_type 			= "ALL"
+  dns_server_ips    		= ["10.11.12.13"]
+  dns_search_domains   		= ["acme.com"]
+  hostname            		= "www.acme.com"
+  trusted_subnet_ips      	= ["10.0.0.0/8", "20.0.0.0/8"]
+  trusted_gateway_ips 		= ["10.0.0.1"]
+  trusted_dhcp_servers_ips 	= ["10.0.0.2"]
+  resolved_ips_for_hostname = [ "20.20.20.20"]
+  trusted_egress_ips 		= ["10.0.0.3", "10.0.0.4"]
+  active 					= true
 }
 
 data "zcc_trusted_network" "this" {
-  network_name = zcc_trusted_network.this.network_name
+  name = zcc_trusted_network.this.name
 }
 `, name)
 }
@@ -98,7 +135,12 @@ func testAccCheckTrustedNetworkDestroy(s *terraform.State) error {
 		if err == nil {
 			return fmt.Errorf("trusted network %d still exists", id)
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "not found") {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			continue
+		}
+		lower := strings.ToLower(err.Error())
+		if strings.Contains(lower, "not found") || strings.Contains(lower, "record not available") {
 			continue
 		}
 		return fmt.Errorf("unexpected error verifying trusted network destroy: %w", err)

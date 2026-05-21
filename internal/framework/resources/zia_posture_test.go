@@ -19,23 +19,6 @@ import (
 	zccacctest "github.com/zscaler/terraform-provider-zcc/internal/framework/acctest"
 )
 
-// TestAccZIAPosture_basic exercises the full lifecycle of zcc_zia_posture:
-//
-//  1. Create — name, platform=macos, no trust criteria (the three
-//     *_trust_criteria blocks are Optional+Computed so this is a valid
-//     minimal config).
-//  2. Update — rename + flip platform to windows. Both fields are
-//     Required + non-RequiresReplace, so the same resource is updated
-//     in place via PUT.
-//  3. ImportState — round-trip the resource through `terraform import`
-//     and verify the imported state matches the apply-side state.
-//
-// The trust-criteria blocks are intentionally NOT exercised by this
-// acceptance test: their child `id` field must reference a real
-// criterion in the tenant's ZIA criteria catalog, and that catalog is
-// not deterministic across test runs. A second test can be layered on
-// top once we have a way to fetch a valid criterion id (e.g. via a
-// data source).
 func TestAccZIAPosture_basic(t *testing.T) {
 	rName := fmt.Sprintf("tf-acc-test-posture-%s", acctest.RandString(8))
 	rNameUpdated := rName + "-upd"
@@ -71,14 +54,6 @@ func TestAccZIAPosture_basic(t *testing.T) {
 	})
 }
 
-// TestAccZIAPosture_platformValidator verifies that the
-// stringvalidator.OneOfCaseInsensitive guard rejects unknown platform
-// names at plan time, before the SDK boundary translation would map
-// them silently to 0.
-//
-// This step uses ExpectError instead of an apply round-trip, so it does
-// not need a real tenant (PreCheck still runs to make the test honest
-// about the provider being configurable).
 func TestAccZIAPosture_platformValidator(t *testing.T) {
 	resource.Test(t, resource.TestCase{
 		PreCheck:                 func() { zccacctest.PreCheck(t) },
@@ -89,9 +64,7 @@ func TestAccZIAPosture_platformValidator(t *testing.T) {
 					fmt.Sprintf("tf-acc-test-posture-%s", acctest.RandString(8)),
 					"bsd",
 				),
-				// The stringvalidator.OneOfCaseInsensitive guard wraps the
-				// acceptable values; anchoring on this prefix is the most
-				// stable substring across plugin-testing releases.
+
 				ExpectError: regexp.MustCompile(`Attribute platform value must be one of`),
 			},
 		},
@@ -105,14 +78,36 @@ provider "zcc" {}
 resource "zcc_zia_posture" "this" {
   name     = %[1]q
   platform = %[2]q
+  high_trust_criteria = {
+    cs = [
+      {
+        cn = [
+          { id = "9911", name = "CrowdStrike_ZPA_ZTA_40" },
+          { id = "criterion-id-2", name = "Firewall Enabled" },
+        ]
+      }
+    ]
+  }
+
+  medium_trust_criteria = {
+    cs = [
+      {
+        cn = [
+          { id = "9913", name = "CrowdStrike_ZPA_ZTA_80" },
+        ]
+      }
+    ]
+  }
+
+  low_trust_criteria = {
+    cs = [
+      { id = "9913", name = "CrowdStrike_ZPA_ZTA_80" },
+    ]
+  }
 }
 `, name, platform)
 }
 
-// testAccCheckZIAPostureDestroy verifies that every zcc_zia_posture in
-// state was deleted upstream. The SDK Get call returns either an
-// errorx.ErrorResponse with IsObjectNotFound() == true (preferred) or a
-// generic error whose message contains "not found"; both are accepted.
 func testAccCheckZIAPostureDestroy(s *terraform.State) error {
 	c, err := client.NewClient(zccacctest.ClientConfigFromEnv())
 	if err != nil {

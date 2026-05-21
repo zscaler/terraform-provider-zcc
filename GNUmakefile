@@ -17,9 +17,23 @@ ZCC_PROVIDER_NAMESPACE=zscaler.com/zcc/zcc
 
 # Expression to match against tests
 # go test -run <filter>
-# e.g. Iden will run all TestAccIdentity tests
+# e.g. `make testacc TEST_FILTER=TestAccTrustedNetwork_basic` runs that test only.
+#
+# We compute RUN_FLAG inside an ifdef instead of mutating TEST_FILTER
+# itself. GNU Make's rule is that variables set on the command line
+# override every plain assignment in the makefile body (even `:=`)
+# unless `override` is used — so the older pattern
+#
+#     ifdef TEST_FILTER
+#         TEST_FILTER := -run $(TEST_FILTER)
+#     endif
+#
+# silently dropped the `-run ` prefix when TEST_FILTER was passed on
+# the command line, causing go test to see the regex as a positional
+# argument and quietly run the entire TestAcc* suite. Splitting into a
+# dedicated RUN_FLAG variable avoids that surprise.
 ifdef TEST_FILTER
-	TEST_FILTER := -run $(TEST_FILTER)
+RUN_FLAG := -run $(TEST_FILTER)
 endif
 
 TESTARGS?=-test.v
@@ -47,10 +61,10 @@ sweep:
 
 test:
 	echo $(TEST) | \
-		xargs -t -n4 go test $(TESTARGS) $(TEST_FILTER) -timeout=30s -parallel=10
+		xargs -t -n4 go test $(TESTARGS) $(RUN_FLAG) -timeout=30s -parallel=10
 
 testacc:
-	TF_ACC=1 go test $(TEST) $(TESTARGS) $(TEST_FILTER) -timeout 120m
+	TF_ACC=1 go test $(TEST) $(TESTARGS) $(RUN_FLAG) -timeout 120m
 
 test\:integration\:zcc:
 	@echo "$(COLOR_ZSCALER)Running zcc integration tests...$(COLOR_NONE)"

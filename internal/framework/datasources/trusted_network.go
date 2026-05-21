@@ -69,7 +69,7 @@ func (d *TrustedNetworkDataSource) Schema(ctx context.Context, req datasource.Sc
 		Description: "Retrieves a ZCC trusted network from the /zcc/papi/public/v2/trusted-networks endpoint, by numeric id or by network name.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
-				Description: "Numeric identifier of the trusted network (carried as a string). Either id or network_name must be set.",
+				Description: "Numeric identifier of the trusted network (carried as a string). Either `id` or `name` must be set.",
 				Optional:    true,
 				Computed:    true,
 			},
@@ -90,7 +90,8 @@ func (d *TrustedNetworkDataSource) Schema(ctx context.Context, req datasource.Sc
 				Computed:    true,
 			},
 			"name": schema.StringAttribute{
-				Description: "Server-side name (distinct from network_name on the v2 contract).",
+				Description: "Name of the trusted network. Either `id` or `name` must be set; the data source looks up by the supplied value via the SDK's `GetByName` when `id` is omitted.",
+				Optional:    true,
 				Computed:    true,
 			},
 			"created_by": schema.StringAttribute{
@@ -148,10 +149,10 @@ func (d *TrustedNetworkDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	hasID := !data.ID.IsNull() && data.ID.ValueString() != ""
-	hasName := !data.Name.IsNull() && data.Name.ValueString() != ""
+	hasID := !data.ID.IsNull() && !data.ID.IsUnknown() && data.ID.ValueString() != ""
+	hasName := !data.Name.IsNull() && !data.Name.IsUnknown() && data.Name.ValueString() != ""
 	if !hasID && !hasName {
-		resp.Diagnostics.AddError("Missing Identifier", "Either id or network_name must be specified")
+		resp.Diagnostics.AddError("Missing Identifier", "Either `id` or `name` must be specified on the zcc_trusted_network data source.")
 		return
 	}
 

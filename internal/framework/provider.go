@@ -12,23 +12,12 @@ import (
 	"github.com/zscaler/terraform-provider-zcc/internal/framework/resources"
 )
 
-// Ensure ZCCProvider satisfies the provider interface.
 var _ provider.Provider = &ZCCProvider{}
 
-// ZCCProvider defines the provider implementation.
 type ZCCProvider struct {
-	// version is set to the provider version on release, "dev" when the
-	// provider is built and ran locally, and "test" when running acceptance
-	// testing.
 	version string
 }
 
-// ZCCProviderModel describes the provider data model. Authentication
-// is OneAPI (Zidentity) only — the legacy ZCC V2 client
-// (zcc_client_id / zcc_client_secret / zcc_cloud /
-// use_legacy_client) has been removed; existing configurations
-// referencing those attributes must migrate to ZSCALER_CLIENT_ID /
-// ZSCALER_CLIENT_SECRET (or ZSCALER_PRIVATE_KEY) + ZSCALER_VANITY_DOMAIN.
 type ZCCProviderModel struct {
 	ClientID       types.String `tfsdk:"client_id"`
 	ClientSecret   types.String `tfsdk:"client_secret"`
@@ -110,17 +99,8 @@ func (p *ZCCProvider) Resources(ctx context.Context) []func() resource.Resource 
 		resources.NewZIAPostureResource,
 		resources.NewForwardingProfileResource,
 		resources.NewFailOpenPolicyResource,
-		// Singleton: ZCC device cleanup (GET getDeviceCleanupInfo / PUT setDeviceCleanupInfo).
 		resources.NewDeviceCleanupResource,
-		resources.NewWebAppServiceResource,
 		resources.NewWebPrivacyResource,
-		// Per-OS app profiles (zcc_app_profile_macos, _ios, _windows,
-		// _linux, _android) backed by /web/policy/edit are intentionally
-		// deregistered. The underlying singleton API is unstable —
-		// success responses depend on undocumented field/type
-		// combinations that vary per OS and per UI capture — so the
-		// resources are parked under local_dev/Backup_Config_Future
-		// until the API contract is stabilised upstream.
 	}
 }
 
@@ -136,7 +116,6 @@ func (p *ZCCProvider) DataSources(ctx context.Context) []func() datasource.DataS
 		datasources.NewCustomIPAppsDataSource,
 		datasources.NewPredefinedIPAppsDataSource,
 		datasources.NewProcessBasedAppsDataSource,
-		// datasources.NewApplicationProfilesDataSource — deregistered with the per-OS app_profile resources; the underlying /web/policy APIs are still being stabilised upstream.
 		datasources.NewWebAppServiceDataSource,
 		datasources.NewFailOpenPolicyDataSource,
 		datasources.NewDeviceCleanupDataSource,

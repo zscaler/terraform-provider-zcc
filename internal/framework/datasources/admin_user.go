@@ -3,15 +3,35 @@ package datasources
 import (
 	"context"
 	"fmt"
+	"strconv"
+	"strings"
 
+	"github.com/hashicorp/terraform-plugin-framework-validators/stringvalidator"
 	"github.com/hashicorp/terraform-plugin-framework/datasource"
 	"github.com/hashicorp/terraform-plugin-framework/datasource/schema"
+	"github.com/hashicorp/terraform-plugin-framework/schema/validator"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/admin_users"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
 )
+
+// userTypeAlias maps the human-readable user_type names accepted on the
+// data source (case-insensitive) to the numeric form the upstream
+// /getAdminUsers endpoint requires on the `userType` query parameter.
+// The endpoint validates the parameter as 1..4 — passing the names
+// directly returns HTTP 400.
+var userTypeAlias = map[string]string{
+	"1":   "1",
+	"2":   "2",
+	"3":   "3",
+	"4":   "4",
+	"ZIA": "1",
+	"ZPA": "2",
+	"ZID": "3",
+	"ZDX": "4",
+}
 
 var (
 	_ datasource.DataSource              = &AdminUserDataSource{}
@@ -29,6 +49,7 @@ type AdminUserDataSource struct {
 type AdminUserDataSourceModel struct {
 	ID                           types.Int64  `tfsdk:"id"`
 	UserName                     types.String `tfsdk:"user_name"`
+	UserType                     types.String `tfsdk:"user_type"`
 	AccountEnabled               types.String `tfsdk:"account_enabled"`
 	CompanyID                    types.String `tfsdk:"company_id"`
 	EditEnabled                  types.String `tfsdk:"edit_enabled"`
@@ -86,6 +107,13 @@ func (d *AdminUserDataSource) Schema(ctx context.Context, req datasource.SchemaR
 			"user_name": schema.StringAttribute{
 				Description: "The user name of the admin user.",
 				Optional:    true,
+			},
+			"user_type": schema.StringAttribute{
+				Description: "Service the admin login is provisioned under. The upstream `/getAdminUsers` API requires this query parameter as a numeric value 1-4 (`1=ZIA`, `2=ZPA`, `3=ZID`, `4=ZDX`); for convenience this attribute also accepts the case-insensitive names `ZIA`, `ZPA`, `ZID`, `ZDX`. Defaults to `ZIA` when omitted.",
+				Optional:    true,
+				Validators: []validator.String{
+					stringvalidator.OneOfCaseInsensitive("1", "2", "3", "4", "ZIA", "ZPA", "ZID", "ZDX"),
+				},
 			},
 			"account_enabled":                schema.StringAttribute{Computed: true},
 			"company_id":                     schema.StringAttribute{Computed: true},
@@ -162,10 +190,23 @@ func (d *AdminUserDataSource) Read(ctx context.Context, req datasource.ReadReque
 		return
 	}
 
+	userTypeRaw := strings.ToUpper(strings.TrimSpace(data.UserType.ValueString()))
+	if userTypeRaw == "" {
+		userTypeRaw = "ZIA"
+	}
+	userType, ok := userTypeAlias[userTypeRaw]
+	if !ok {
+		resp.Diagnostics.AddError(
+			"Invalid user_type",
+			fmt.Sprintf("user_type %q is not one of 1/2/3/4 or ZIA/ZPA/ZID/ZDX", data.UserType.ValueString()),
+		)
+		return
+	}
+
 	service := d.client.Service
 
-	tflog.Info(ctx, "Fetching admin users")
-	users, err := admin_users.GetAdminUsers(ctx, service, "")
+	tflog.Info(ctx, "Fetching admin users", map[string]any{"user_type": userType})
+	users, err := admin_users.GetAdminUsers(ctx, service, userType)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Unable to read admin users: %v", err))
 		return
@@ -181,7 +222,10 @@ func (d *AdminUserDataSource) Read(ctx context.Context, req datasource.ReadReque
 			}
 		}
 		if user == nil {
-			resp.Diagnostics.AddError("Not Found", fmt.Sprintf("Admin user with ID %d not found", id))
+			resp.Diagnostics.AddError(
+				"Not Found",
+				fmt.Sprintf("Admin user with ID %d not found under user_type %q. Try a different user_type (ZIA/ZPA/ZID/ZDX).", id, userTypeRaw),
+			)
 			return
 		}
 	} else {
@@ -193,7 +237,10 @@ func (d *AdminUserDataSource) Read(ctx context.Context, req datasource.ReadReque
 			}
 		}
 		if user == nil {
-			resp.Diagnostics.AddError("Not Found", fmt.Sprintf("Admin user with user_name '%s' not found", name))
+			resp.Diagnostics.AddError(
+				"Not Found",
+				fmt.Sprintf("Admin user with user_name %q not found under user_type %q. Try a different user_type (ZIA/ZPA/ZID/ZDX).", name, userTypeRaw),
+			)
 			return
 		}
 	}
@@ -202,11 +249,12 @@ func (d *AdminUserDataSource) Read(ctx context.Context, req datasource.ReadReque
 	model := AdminUserDataSourceModel{
 		ID:                           types.Int64Value(int64(user.ID)),
 		UserName:                     types.StringValue(user.UserName),
+		UserType:                     data.UserType,
 		AccountEnabled:               types.StringValue(user.AccountEnabled),
 		CompanyID:                    types.StringValue(user.CompanyID),
 		EditEnabled:                  types.StringValue(user.EditEnabled),
 		IsDefaultAdmin:               types.StringValue(user.IsDefaultAdmin),
-		ServiceType:                  types.StringValue(user.ServiceType),
+		ServiceType:                  types.StringValue(strconv.Itoa(user.ServiceType)),
 		AdminManagement:              types.StringValue(role.AdminManagement),
 		AdministratorGroup:           types.StringValue(role.AdministratorGroup),
 		AndroidProfile:               types.StringValue(role.AndroidProfile),

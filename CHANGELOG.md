@@ -16,7 +16,6 @@
         - `zcc_forwarding_profile`: Manages forwarding profiles.
         - `zcc_notification_template`: Manages notification templates
         - `zcc_trusted_network`: Manages trusted networks.
-        - `zcc_web_app_service`: Manages forwarding profile.
         - `zcc_web_privacy`: Adds or updates the configuration information for end user and device-related PII.
         - `zcc_zia_posture`: Manages ZIA Posture configuration
 
