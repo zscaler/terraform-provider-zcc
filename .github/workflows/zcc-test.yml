@@ -15,14 +15,14 @@ on:
   workflow_dispatch:
 
 jobs:
-  zcc-zs3-tenants:
+  zcc-zsbeta-tenants:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         goVersion: ["1.25"]
         environment:
-          - ZCC_ZS3_TENANT01
+          - ZCC_ZSBETA_TENANT01
     environment: ${{ matrix.environment }}
     steps:
       - name: Checkout code

@@ -9,7 +9,7 @@
 
 ### Initial Release
 
-- [PR #1](https://github.com/zscaler/terraform-provider-zcc/pull/1) - Initial Terraform Plugin Framework provider for Zscaler Client Connector (ZCC)
+- [PR #8](https://github.com/zscaler/terraform-provider-zcc/pull/8) - Initial Terraform Plugin Framework provider for Zscaler Client Connector (ZCC)
     - Resources:
         - `zcc_device_cleanup`:
         - `zcc_failopen_policy`:
