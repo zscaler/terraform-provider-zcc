@@ -71,17 +71,18 @@ jobs:
         uses: nick-fields/retry@v3
         with:
           max_attempts: 1
-          timeout_minutes: 30  # Adjust as needed
+          # timeout_minutes is the wall-clock cap for this CI step.
+          # It must exceed the -timeout flag baked into the
+          # `test:integration:zcc` make target (currently 120m) plus
+          # tooling overhead, otherwise the retry action kills the
+          # job before `go test` would.
+          timeout_minutes: 130
           command: |
-            make sweep
             make test:integration:zcc
-            make sweep
         env:
           ZSCALER_CLIENT_ID: ${{ secrets.ZSCALER_CLIENT_ID }}
           ZSCALER_CLIENT_SECRET: ${{ secrets.ZSCALER_CLIENT_SECRET }}
           ZSCALER_VANITY_DOMAIN: ${{ secrets.ZSCALER_VANITY_DOMAIN }}
           ZSCALER_CLOUD: ${{ secrets.ZSCALER_CLOUD }}
-          ZCC_SDK_TEST_SWEEP: ${{ secrets.ZCC_SDK_TEST_SWEEP }}
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TF_ACC: ${{ secrets.TF_ACC }}
-          ZCC_ACC_TEST_FORCE_SWEEPERS: ${{ secrets.ZCC_ACC_TEST_FORCE_SWEEPERS }}

@@ -1,4 +1,3 @@
-SWEEP?=global
 TEST?=$$(go list ./... |grep -v 'vendor')
 GOFMT_FILES?=$$(find . -name '*.go' | grep -v vendor)
 WEBSITE_REPO=github.com/hashicorp/terraform-website
@@ -55,10 +54,6 @@ clean:
 clean-all:
 	go clean -cache -testcache -modcache ./...
 
-sweep:
-	@echo "WARNING: This will destroy infrastructure. Use only in development accounts."
-	go test $(TEST) -sweep=$(SWEEP) $(SWEEPARGS)
-
 test:
 	echo $(TEST) | \
 		xargs -t -n4 go test $(TESTARGS) $(RUN_FLAG) -timeout=30s -parallel=10
@@ -66,9 +61,17 @@ test:
 testacc:
 	TF_ACC=1 go test $(TEST) $(TESTARGS) $(RUN_FLAG) -timeout 120m
 
+# test:integration:zcc is the CI entry point. It exercises the
+# Plugin-Framework code under ./internal/framework/... (this provider
+# does not ship SDK v2 resources, so there is no top-level ./zcc
+# package as in terraform-provider-zia / terraform-provider-zpa).
+# TF_ACC=1 is set explicitly so the recipe works the same locally and
+# in CI, and -timeout 120m mirrors the `testacc` cap so live-API tests
+# (singletons, ImportStateVerify steps, etc.) cannot be killed by Go's
+# default 10-minute per-binary timeout.
 test\:integration\:zcc:
 	@echo "$(COLOR_ZSCALER)Running zcc integration tests...$(COLOR_NONE)"
-	go test -v -race -cover -coverprofile=zcccoverage.out -covermode=atomic ./zcc -parallel 1 -timeout 60m
+	TF_ACC=1 go test -v -race -cover -coverprofile=zcccoverage.out -covermode=atomic ./internal/framework/... -parallel 1 -timeout 120m
 	go tool cover -html=zcccoverage.out -o zcccoverage.html
 	go tool cover -func zcccoverage.out | grep total:
 
