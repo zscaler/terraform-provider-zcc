@@ -1,8 +1,8 @@
 [![Release](https://github.com/zscaler/terraform-provider-zcc/actions/workflows/release.yml/badge.svg)](https://github.com/zscaler/terraform-provider-zcc/actions/workflows/release.yml)
-[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/zscaler/terraform-provider-zcc)](https://github.com/zscaler/terraform-provider-zcc/v2/blob/master/.go-version)
+[![GitHub go.mod Go version](https://img.shields.io/github/go-mod/go-version/zscaler/terraform-provider-zcc)](https://github.com/zscaler/terraform-provider-zcc/blob/master/.go-version)
 [![Go Report Card](https://goreportcard.com/badge/github.com/zscaler/terraform-provider-zcc)](https://goreportcard.com/report/github.com/zscaler/terraform-provider-zcc)
 [![codecov](https://codecov.io/gh/zscaler/terraform-provider-zcc/graph/badge.svg?token=7YX2V2LV8H)](https://codecov.io/gh/zscaler/terraform-provider-zcc)
-[![License](https://img.shields.io/github/license/zscaler/terraform-provider-zcc?color=blue)](https://github.com/zscaler/terraform-provider-zcc/v2/blob/master/LICENSE)
+[![License](https://img.shields.io/github/license/zscaler/terraform-provider-zcc?color=blue)](https://github.com/zscaler/terraform-provider-zcc/blob/master/LICENSE)
 [![Automation Hub](https://img.shields.io/badge/automation-hub-blue)](https://automate.zscaler.com/docs/tools/sdk-documentation/sdk-getting-started)
 [![Zscaler Community](https://img.shields.io/badge/zscaler-community-blue)](https://community.zscaler.com/)
 
