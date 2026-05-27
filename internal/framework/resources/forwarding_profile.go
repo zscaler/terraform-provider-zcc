@@ -2,6 +2,7 @@ package resources
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,6 +18,7 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler"
+	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/forwarding_profile"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
@@ -506,6 +508,12 @@ func (r *ForwardingProfileResource) Update(ctx context.Context, req resource.Upd
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// Delete tolerates a 404 on the upstream DELETE — the goal state
+// ("record does not exist") is already reached. Unlike the other
+// full-CRUD resources we do NOT pre-check with a GET because the SDK
+// only exposes a list-by-company-ID endpoint (no single-GET), and the
+// list is expensive on tenants with many profiles. The post-DELETE 404
+// branch is sufficient idempotency.
 func (r *ForwardingProfileResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before managing resources.")
@@ -529,6 +537,11 @@ func (r *ForwardingProfileResource) Delete(ctx context.Context, req resource.Del
 	tflog.Info(ctx, "Deleting ZCC forwarding profile", map[string]any{"id": idStr})
 
 	if _, err := forwarding_profile.DeleteForwardingProfile(ctx, service, idInt); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Forwarding profile already removed upstream; treating as success", map[string]any{"id": idStr})
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete forwarding profile: %v", err))
 		return
 	}
@@ -905,16 +918,28 @@ func flattenSystemProxyDataObject(spd forwarding_profile.SystemProxyData) types.
 	return obj
 }
 
+// sortByPlanOrder reorders API responses into a deterministic order so the
+// resource state is stable across CRUD and Import.
+//
+// During Create/Update/Read the caller passes the plan/state network_type
+// order so we can faithfully echo back what the user wrote in HCL. During
+// ImportState there is no plan, so planOrder is empty; in that case we sort
+// ascending by network_type. The HCL conventions for this resource expect
+// network_type entries in ascending order (0,1,2,3), so the post-import
+// state matches a freshly-written configuration.
 func sortByPlanOrder[T any](items []T, getNetworkType func(T) int, planOrder []int) []T {
+	sorted := make([]T, len(items))
+	copy(sorted, items)
 	if len(planOrder) == 0 {
-		return items
+		sort.SliceStable(sorted, func(i, j int) bool {
+			return getNetworkType(sorted[i]) < getNetworkType(sorted[j])
+		})
+		return sorted
 	}
 	orderIndex := make(map[int]int, len(planOrder))
 	for i, nt := range planOrder {
 		orderIndex[nt] = i
 	}
-	sorted := make([]T, len(items))
-	copy(sorted, items)
 	sort.SliceStable(sorted, func(i, j int) bool {
 		idxI, okI := orderIndex[getNetworkType(sorted[i])]
 		idxJ, okJ := orderIndex[getNetworkType(sorted[j])]

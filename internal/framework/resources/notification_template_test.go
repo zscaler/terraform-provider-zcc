@@ -18,20 +18,6 @@ import (
 	zccacctest "github.com/zscaler/terraform-provider-zcc/internal/framework/acctest"
 )
 
-// TestAccNotificationTemplate_basic exercises the full lifecycle of
-// zcc_notification_template:
-//
-//  1. Create — full config mirrored from local_dev/notification_template/main.tf
-//     (all top-level toggles + both nested zia/zpa blocks).
-//  2. Update — rename and flip a representative pair of bool toggles +
-//     bump the ZPA reauth interval, all without RequiresReplace, so the
-//     same resource is updated in place via PUT.
-//  3. ImportState — round-trip via `terraform import` and verify the
-//     imported state matches the apply-side state.
-//
-// CheckDestroy uses the SDK Get; both an errorx.ErrorResponse with
-// IsObjectNotFound() == true and a generic "not found" error message
-// are accepted, mirroring the resource's own Read handling.
 func TestAccNotificationTemplate_basic(t *testing.T) {
 	rName := fmt.Sprintf("tf-acc-test-nt-%s", acctest.RandString(8))
 	rNameUpdated := rName + "-upd"
@@ -90,11 +76,6 @@ func TestAccNotificationTemplate_basic(t *testing.T) {
 	})
 }
 
-// testAccNotificationTemplateConfig mirrors local_dev/notification_template/main.tf
-// — every top-level toggle on, both nested blocks fully populated.
-// Parameters are kept explicit so the update step can vary the
-// transient-display duration and the ZPA reauth interval without
-// touching the rest of the body.
 func testAccNotificationTemplateConfig(name string, durationSeconds, reauthMinutes int) string {
 	return fmt.Sprintf(`
 provider "zcc" {}
@@ -129,10 +110,6 @@ resource "zcc_notification_template" "this" {
 `, name, durationSeconds, reauthMinutes)
 }
 
-// testAccNotificationTemplateConfigUpdated flips a representative subset
-// of booleans (enable_app_updates, enable_do_not_disturb, and the
-// nested enable_zia_ips_popup) so the Update step in the test verifies
-// both top-level and nested PUTs round-trip cleanly through the API.
 func testAccNotificationTemplateConfigUpdated(name string, durationSeconds, reauthMinutes int) string {
 	return fmt.Sprintf(`
 provider "zcc" {}
@@ -167,12 +144,6 @@ resource "zcc_notification_template" "this" {
 `, name, durationSeconds, reauthMinutes)
 }
 
-// testAccCheckNotificationTemplateDestroy verifies that every
-// zcc_notification_template in state has been deleted upstream. The SDK
-// Get call returns either an errorx.ErrorResponse with
-// IsObjectNotFound() == true (preferred) or a generic error whose
-// message contains "not found"; both are accepted, mirroring the
-// resource's own Read handling.
 func testAccCheckNotificationTemplateDestroy(s *terraform.State) error {
 	c, err := client.NewClient(zccacctest.ClientConfigFromEnv())
 	if err != nil {

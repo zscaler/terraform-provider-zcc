@@ -15,11 +15,14 @@ description: |-
 
 Retrieves a ZCC admin user by **numeric id** or by **user name**. The data source returns both the user-level flags (`account_enabled`, `service_type`, etc.) and a flattened view of the user's company role — see [`zcc_admin_roles`](zcc_admin_roles.md) for the role-level meaning of each permission code.
 
+~> **API requirement:** The upstream `/getAdminUsers` endpoint requires a `userType` query parameter scoping the lookup to a single Zscaler service. The data source exposes this as the optional `user_type` attribute and defaults to `ZIA` when omitted. If the admin login lives under a different service, set `user_type` explicitly (`ZPA`, `ZID`, or `ZDX`).
+
 ## Example Usage
 
 ```terraform
 data "zcc_admin_user" "alice" {
   user_name = "alice@corp.example"
+  user_type = "ZIA"
 }
 
 output "alice_role" {
@@ -33,6 +36,7 @@ output "alice_role" {
 
 - `id` (Number) — Numeric user identifier. Either `id` or `user_name` must be set.
 - `user_name` (String) — Login of the admin user (for example an email). Either `id` or `user_name` must be set.
+- `user_type` (String) — Service scope the admin login is provisioned under. Accepts the numeric API values (`"1"`, `"2"`, `"3"`, `"4"`) or the case-insensitive aliases `"ZIA"`, `"ZPA"`, `"ZID"`, `"ZDX"`. Defaults to `"ZIA"` when omitted.
 
 ### Read-Only
 

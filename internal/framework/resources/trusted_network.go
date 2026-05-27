@@ -37,11 +37,17 @@ type TrustedNetworkResource struct {
 // TrustedNetworkResourceModel mirrors the user-configurable subset of
 // trusted_network_v2.TrustedNetworkV2.
 //
-// Pure server-side metadata — companyId, createdBy, editedBy, guid — is
-// intentionally NOT carried on the resource so it can't show up as
-// HCL-configurable in completions or in `terraform plan`. Consumers that
-// need to read those fields should use the `zcc_trusted_network` data
-// source.
+// Pure server-side metadata — companyId, createdBy, editedBy, guid,
+// zpaId — is intentionally NOT carried on the resource so it can't show
+// up as HCL-configurable in completions or in `terraform plan`.
+// Consumers that need to read those fields should use the
+// `zcc_trusted_network` data source.
+//
+// `zpaId` is a particularly important exclusion: the ZCC API populates
+// it **lazily** — the POST response on create omits it, but subsequent
+// GETs return it. Carrying it on the resource breaks
+// `ImportStateVerify` (post-create state has `""`; post-import state
+// has the API-assigned GUID).
 //
 // Type notes:
 //   - id is a string at the TF boundary (Terraform convention) even
@@ -53,7 +59,6 @@ type TrustedNetworkResource struct {
 //   - condition_type is a string ("ALL"/"ANY" or "0"/"1" per the API).
 type TrustedNetworkResourceModel struct {
 	ID                     types.String `tfsdk:"id"`
-	ZPAID                  types.String `tfsdk:"zpa_id"`
 	Active                 types.Bool   `tfsdk:"active"`
 	ConditionType          types.String `tfsdk:"condition_type"`
 	Name                   types.String `tfsdk:"name"`
@@ -92,10 +97,6 @@ func (r *TrustedNetworkResource) Schema(ctx context.Context, req resource.Schema
 				PlanModifiers: []planmodifier.String{
 					stringplanmodifier.UseStateForUnknown(),
 				},
-			},
-			"zpa_id": schema.StringAttribute{
-				Computed:    true,
-				Description: "Linked ZPA tenant identifier. API field: zpaId.",
 			},
 			"active": schema.BoolAttribute{
 				Required:    true,
@@ -246,6 +247,21 @@ func (r *TrustedNetworkResource) Update(ctx context.Context, req resource.Update
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// Delete uses the idempotent "Get-then-Delete" pattern (mirroring
+// terraform-provider-zia/zia/resource_zia_email_profile.go::resourceEmailProfileDelete):
+//
+//  1. GET first. If the API has already removed the record (out-of-band
+//     UI delete, prior sweeper run, race with a concurrent operator),
+//     treat that as success and exit cleanly instead of surfacing a
+//     "Record not available" / 404 error to the user.
+//  2. Call DELETE. If the upstream raced us between the GET and the
+//     DELETE, the resulting 404 is also treated as success — the goal
+//     state ("record does not exist") has been reached either way.
+//
+// Both branches go through the structured errorx.ErrorResponse +
+// IsObjectNotFound() helper rather than substring-matching the error
+// message, because the ZCC v2 endpoints return varied 404 bodies
+// (e.g. `{"code":3199,"message":"Record not available"}`).
 func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before managing resources.")
@@ -265,8 +281,23 @@ func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.Delete
 	}
 
 	service := r.client.Service
+
+	if _, err := trusted_network_v2.Get(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Trusted network already removed upstream; nothing to delete", map[string]any{"id": id})
+			return
+		}
+		tflog.Warn(ctx, "Pre-delete GET failed; proceeding to DELETE anyway", map[string]any{"id": id, "error": err.Error()})
+	}
+
 	tflog.Info(ctx, "Deleting ZCC trusted network", map[string]any{"id": id})
 	if _, err := trusted_network_v2.Delete(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Trusted network was removed between GET and DELETE; treating as success", map[string]any{"id": id})
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete trusted network %d: %v", id, err))
 	}
 }
@@ -310,7 +341,6 @@ func expandTrustedNetwork(plan *TrustedNetworkResourceModel) trusted_network_v2.
 	return trusted_network_v2.TrustedNetworkV2{
 		Active:                 plan.Active.ValueBool(),
 		ConditionType:          plan.ConditionType.ValueString(),
-		ZPAID:                  plan.ZPAID.ValueString(),
 		Name:                   plan.Name.ValueString(),
 		Hostname:               plan.Hostname.ValueString(),
 		SSID:                   plan.SSID.ValueString(),
@@ -329,12 +359,11 @@ func expandTrustedNetwork(plan *TrustedNetworkResourceModel) trusted_network_v2.
 // ---------------------------------------------------------------------------
 
 // flattenTrustedNetwork copies the server's authoritative view back into
-// the Terraform model. Computed fields (id, guid, company_id, *_by) are
-// always written; user-set fields are also overwritten so any
-// server-side normalisation flows through to state.
+// the Terraform model. `zpaId` (and other server-only metadata) is
+// deliberately not touched here — the resource model does not expose it;
+// consumers read it via the matching data source.
 func flattenTrustedNetwork(tn *trusted_network_v2.TrustedNetworkV2, model *TrustedNetworkResourceModel) {
 	model.ID = types.StringValue(strconv.Itoa(tn.ID))
-	model.ZPAID = types.StringValue(tn.ZPAID)
 	model.Active = types.BoolValue(tn.Active)
 	model.ConditionType = types.StringValue(tn.ConditionType)
 	model.Name = types.StringValue(tn.Name)

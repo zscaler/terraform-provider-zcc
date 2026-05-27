@@ -249,6 +249,12 @@ func (r *NotificationTemplateResource) Update(ctx context.Context, req resource.
 	resp.Diagnostics.Append(resp.State.Set(ctx, &plan)...)
 }
 
+// Delete uses the idempotent "Get-then-Delete" pattern. See the longer
+// comment on TrustedNetworkResource.Delete for the rationale; both
+// branches treat a 404 (`errorx.ErrorResponse.IsObjectNotFound()`) as
+// success rather than a hard error so out-of-band UI deletes and
+// concurrent sweeper runs do not surface confusing "Record not
+// available" diagnostics to Terraform users.
 func (r *NotificationTemplateResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before managing resources.")
@@ -268,8 +274,23 @@ func (r *NotificationTemplateResource) Delete(ctx context.Context, req resource.
 	}
 
 	service := r.client.Service
+
+	if _, err := notification_template.Get(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Notification template already removed upstream; nothing to delete", map[string]any{"id": id})
+			return
+		}
+		tflog.Warn(ctx, "Pre-delete GET failed; proceeding to DELETE anyway", map[string]any{"id": id, "error": err.Error()})
+	}
+
 	tflog.Info(ctx, "Deleting ZCC notification template", map[string]any{"id": id})
 	if _, err := notification_template.Delete(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "Notification template was removed between GET and DELETE; treating as success", map[string]any{"id": id})
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete notification template %d: %v", id, err))
 	}
 }

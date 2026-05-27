@@ -10,10 +10,6 @@ import (
 	zccacctest "github.com/zscaler/terraform-provider-zcc/internal/framework/acctest"
 )
 
-// TestAccDataSourceNotificationTemplate_byName creates a template via
-// the resource and reads it back with the data source using a name
-// lookup, verifying the canonical fields round-trip identically through
-// /zcc/papi/public/v2/notification-templates.
 func TestAccDataSourceNotificationTemplate_byName(t *testing.T) {
 	rName := fmt.Sprintf("tf-acc-test-nt-ds-%s", acctest.RandString(8))
 	resourceName := "zcc_notification_template.this"

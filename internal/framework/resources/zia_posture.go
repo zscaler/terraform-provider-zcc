@@ -37,16 +37,6 @@ type ZIAPostureResource struct {
 	client *client.Client
 }
 
-// ZIAPostureResourceModel mirrors the user-configurable subset of
-// zia_posture.ZIAPosture.
-//
-// The three trust tiers (high / medium / low) all share the same shape:
-//
-//	{ cs: [ { cn: [ { id, name, udid }, ... ] }, ... ] }
-//
-// Each "cs" element is a CRITERIA SET: every criterion in its `cn` list
-// must match (AND). The outer `cs` list is then OR'd: matching any set
-// promotes the device to that trust tier.
 type ZIAPostureResourceModel struct {
 	ID                  types.String `tfsdk:"id"`
 	Name                types.String `tfsdk:"name"`
@@ -244,17 +234,27 @@ func (r *ZIAPostureResource) Delete(ctx context.Context, req resource.DeleteRequ
 	}
 
 	service := r.client.Service
+
+	if _, err := zia_posture.Get(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "ZIA posture profile already removed upstream; nothing to delete", map[string]any{"id": id})
+			return
+		}
+		tflog.Warn(ctx, "Pre-delete GET failed; proceeding to DELETE anyway", map[string]any{"id": id, "error": err.Error()})
+	}
+
 	tflog.Info(ctx, "Deleting ZCC ZIA posture profile", map[string]any{"id": id})
 	if _, err := zia_posture.Delete(ctx, service, id); err != nil {
+		var respErr *errorx.ErrorResponse
+		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+			tflog.Info(ctx, "ZIA posture profile was removed between GET and DELETE; treating as success", map[string]any{"id": id})
+			return
+		}
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete zia posture profile %d: %v", id, err))
 	}
 }
 
-// ImportState supports two shapes:
-//   - `terraform import zcc_zia_posture.this 12345` — numeric id passed
-//     straight through; Read fills the rest.
-//   - `terraform import zcc_zia_posture.this "Corp High Trust"` — looked
-//     up by case-insensitive Name through the SDK's GetByName helper.
 func (r *ZIAPostureResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before importing resources.")
