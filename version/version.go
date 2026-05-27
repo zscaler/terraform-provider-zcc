@@ -1,3 +1,3 @@
 package version
 
-var ProviderVersion = "0.1.0"
+var ProviderVersion = "0.1.0-beta.1"

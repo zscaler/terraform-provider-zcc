@@ -15,8 +15,14 @@ builds:
     mod_timestamp: "{{ .CommitTimestamp }}"
     flags:
       - -trimpath
+    # `-X` injects the released semver into the provider's
+    # `version.ProviderVersion` symbol at link time so the binary
+    # reports the actual git tag instead of the placeholder hard-coded
+    # in version/version.go. The previous `-X main.version=...` /
+    # `-X main.commit=...` were silently no-oped by the Go linker
+    # because no such variables exist in package main.
     ldflags:
-      - "-s -w -X main.version={{.Version}} -X main.commit={{.Commit}}"
+      - "-s -w -X github.com/zscaler/terraform-provider-zcc/version.ProviderVersion={{.Version}}"
     goos:
       - freebsd
       - windows
@@ -30,9 +36,16 @@ builds:
     ignore:
       - goos: darwin
         goarch: "386"
+      # Windows-on-ARM is 64-bit only; goreleaser flags `windows/arm`
+      # as a broken target in `goreleaser check`.
+      - goos: windows
+        goarch: arm
     binary: "{{ .ProjectName }}_v{{ .Version }}"
 archives:
-  - format: zip
+  # `formats` (plural) replaces the singular `format` field that was
+  # deprecated in GoReleaser v2.6 — see
+  # https://goreleaser.com/deprecations/#archivesformat
+  - formats: ["zip"]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 checksum:
   extra_files:
@@ -62,3 +75,10 @@ release:
   #   owner: zscaler
   #   name: terraform-provider-zcc
   draft: true
+  # `prerelease: auto` flips the GitHub release's Pre-release flag
+  # automatically when the tag has a SemVer pre-release suffix
+  # (e.g. `v0.1.0-beta.1`, `v0.1.0-rc.1`). Combined with `draft: true`
+  # above, the drafted release lands in the GitHub UI with the
+  # Pre-release radio already selected, which keeps beta builds off
+  # the "latest" channel on both GitHub and the Terraform Registry.
+  prerelease: auto

@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 (May, 20 2026) - Initial Beta Release
+## 0.1.0 (May, 26 2026) - Initial Beta Release
 
 ### Notes
 
