@@ -43,7 +43,7 @@ jobs:
         run: go clean -modcache
 
       - name: Cache Go modules
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/go/pkg/mod
@@ -72,7 +72,7 @@ jobs:
         run: make build
 
       - name: Run tests with retry
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@v4
         with:
           max_attempts: 1
           # timeout_minutes is the wall-clock cap for this CI step.
