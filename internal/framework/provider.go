@@ -73,8 +73,9 @@ func (p *ZCCProvider) Schema(ctx context.Context, req provider.SchemaRequest, re
 				Optional:    true,
 			},
 			"parallelism": schema.Int64Attribute{
-				Description: "Number of concurrent requests to make within a resource where bulk operations are not possible",
-				Optional:    true,
+				Description:        "Deprecated and ignored. Previously limited the number of concurrent API requests. Rate limiting is now handled automatically and this attribute has no effect.",
+				Optional:           true,
+				DeprecationMessage: "This attribute no longer has any effect and will be removed in a future major release. Remove it from the provider block. API rate limits are handled automatically: the provider honours the Retry-After header returned on a 429 response and retries transparently.",
 			},
 			"request_timeout": schema.Int64Attribute{
 				Description: "Timeout for single request (in seconds) which is made to Zscaler",

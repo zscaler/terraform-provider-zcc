@@ -13,6 +13,7 @@ import (
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
 	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/tnbackend"
 )
 
 var (
@@ -66,7 +67,10 @@ func (d *TrustedNetworkDataSource) Schema(ctx context.Context, req datasource.Sc
 		}
 	}
 	resp.Schema = schema.Schema{
-		Description: "Retrieves a ZCC trusted network from the /zcc/papi/public/v2/trusted-networks endpoint, by numeric id or by network name.",
+		Description: "Retrieves a ZCC trusted network by numeric id or by network name. The data source " +
+			"automatically detects which API generation the tenant serves: it uses the " +
+			"/zcc/papi/public/v2/trusted-networks endpoint where available and falls back to " +
+			"/zcc/papi/public/v1/webTrustedNetwork otherwise. `zpa_id` is only populated by the v2 API.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Description: "Numeric identifier of the trusted network (carried as a string). Either `id` or `name` must be set.",
@@ -156,26 +160,22 @@ func (d *TrustedNetworkDataSource) Read(ctx context.Context, req datasource.Read
 		return
 	}
 
-	service := d.client.Service
+	backend, err := tnbackend.For(ctx, d.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
+	}
 
-	var (
-		net *trusted_network_v2.TrustedNetworkV2
-		err error
-	)
+	var net *trusted_network_v2.TrustedNetworkV2
 
 	if hasID {
-		idStr := data.ID.ValueString()
-		id, convErr := strconv.Atoi(idStr)
-		if convErr != nil {
-			resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", idStr, convErr))
-			return
-		}
-		tflog.Info(ctx, "Fetching trusted network", map[string]any{"id": id})
-		net, err = trusted_network_v2.Get(ctx, service, id)
+		id := data.ID.ValueString()
+		tflog.Info(ctx, "Fetching trusted network", map[string]any{"id": id, "api_version": backend.Version()})
+		net, err = backend.Get(ctx, id)
 	} else {
 		name := data.Name.ValueString()
-		tflog.Info(ctx, "Fetching trusted network", map[string]any{"network_name": name})
-		net, err = trusted_network_v2.GetByName(ctx, service, name)
+		tflog.Info(ctx, "Fetching trusted network", map[string]any{"network_name": name, "api_version": backend.Version()})
+		net, err = backend.GetByName(ctx, name)
 	}
 
 	if err != nil {

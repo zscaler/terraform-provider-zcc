@@ -14,7 +14,7 @@ description: |-
 * [Automation Hub API reference](https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller)
 * [Legacy API reference](https://help.zscaler.com/legacy-apis/public-api-controller)
 
-Reads a ZCC trusted network via `/zcc/papi/public/v2/trusted-networks`, by numeric id or by name.
+Reads a ZCC trusted network by numeric id or by name. The API generation is detected automatically: the data source uses `/zcc/papi/public/v2/trusted-networks` where available and transparently falls back to `/zcc/papi/public/v1/webTrustedNetwork` on tenants where v2 is not yet enabled.
 
 ## Example Usage
 
@@ -44,7 +44,7 @@ output "corp_subnets" {
 - `active` (Boolean) — Whether the trusted network is active.
 - `condition_type` (String) — Match policy applied across the criteria below (`ALL` / `ANY`).
 - `company_id` (Number) — Numeric company id the network is scoped to.
-- `zpa_id` (String) — Linked ZPA tenant identifier.
+- `zpa_id` (String) — Linked ZPA tenant identifier. Only populated by the v2 API; empty on tenants served by v1.
 - `guid` (String) — Stable GUID of the trusted network.
 - `created_by` (String) — Administrator who created the trusted network.
 - `edited_by` (String) — Administrator who last edited the trusted network.
