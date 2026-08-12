@@ -156,8 +156,6 @@ Before starting with this Terraform provider you must create an API Client in th
 
 - `http_proxy` - (Optional) This is a custom URL endpoint that can be used for unit testing or local caching proxies. Can also be sourced from the `ZSCALER_HTTP_PROXY` environment variable.
 
-- `parallelism` - (Optional) Number of concurrent requests to make within a resource where bulk operations are not possible. The provider creates a worker pool of this size to serialize API calls. The default is `1`. Note that this is separate from Terraform's CLI `-parallelism` flag, which controls how many resources are processed concurrently (default `10`). [Learn More](https://help.zscaler.com/oneapi/understanding-rate-limiting)
-
 - `max_retries` - (Optional) Maximum number of retries to attempt before returning an error, the default is `5`.
 
 - `request_timeout` - (Optional) Timeout for single request (in seconds) which is made to Zscaler, the default is `0` (means no limit is set). The maximum value can be `300`.

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.1.1 (August 12, 2026)
+
+### Notes
+
+- Release date: **(August 12, 2026)**
+- Supported Terraform version: **v1.x**
+
+### Deprecations
+
+- [PR #26](https://github.com/zscaler/terraform-provider-zcc/pull/26) - Deprecated the `parallelism` provider attribute. The attribute has no effect and will be removed in a future major release; remove it from the provider block. Rate limiting requires no configuration: when a limit is exceeded, the API returns the interval to wait and the provider retries the request automatically.
+
+### Bug Fixes
+
+- [PR #26](https://github.com/zscaler/terraform-provider-zcc/pull/26) - `zcc_trusted_network`: added support for tenants where the v2 `/trusted-networks` API is not yet available. The provider now detects the API generation automatically — no configuration needed — and transparently falls back to the legacy v1 `/webTrustedNetwork` endpoints using the same HCL. Import and data-source lookups by name now also resolve an unambiguous partial name on both API versions.
+
+### Documentation
+
+- [PR #9](https://github.com/zscaler/terraform-provider-zcc/pull/9) - Removed the `parallelism` attribute from the provider argument reference.
+
 ## 0.1.0 (May, 26 2026) - Initial Beta Release
 
 ### Notes

@@ -2,7 +2,6 @@ package resources
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"strconv"
 
@@ -13,11 +12,11 @@ import (
 	"github.com/hashicorp/terraform-plugin-framework/resource/schema/stringplanmodifier"
 	"github.com/hashicorp/terraform-plugin-framework/types"
 	"github.com/hashicorp/terraform-plugin-log/tflog"
-	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/errorx"
 	"github.com/zscaler/zscaler-sdk-go/v3/zscaler/zcc/services/trusted_network_v2"
 
 	"github.com/zscaler/terraform-provider-zcc/internal/client"
 	"github.com/zscaler/terraform-provider-zcc/internal/framework/helpers"
+	"github.com/zscaler/terraform-provider-zcc/internal/framework/tnbackend"
 )
 
 var (
@@ -87,9 +86,11 @@ func (r *TrustedNetworkResource) Schema(ctx context.Context, req resource.Schema
 		}
 	}
 	resp.Schema = schema.Schema{
-		Description: "Manages a ZCC trusted network via the /zcc/papi/public/v2/trusted-networks endpoint. " +
-			"The IP/domain criteria fields are List(String) on this resource (the v1 comma-separated string " +
-			"surface is gone); pass `[]` for criteria you do not want to set.",
+		Description: "Manages a ZCC trusted network. The resource automatically detects which API generation the " +
+			"tenant serves: it speaks the /zcc/papi/public/v2/trusted-networks endpoint where available and " +
+			"transparently falls back to /zcc/papi/public/v1/webTrustedNetwork otherwise — no configuration " +
+			"required. The HCL surface is identical on both: the IP/domain criteria fields are List(String) " +
+			"(the v1 comma-separated string surface is not exposed); pass `[]` for criteria you do not want to set.",
 		Attributes: map[string]schema.Attribute{
 			"id": schema.StringAttribute{
 				Computed:    true,
@@ -157,12 +158,16 @@ func (r *TrustedNetworkResource) Create(ctx context.Context, req resource.Create
 		return
 	}
 
-	service := r.client.Service
+	backend, err := tnbackend.For(ctx, r.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
+		return
+	}
 	payload := expandTrustedNetwork(&plan)
 
-	tflog.Info(ctx, "Creating ZCC trusted network", map[string]any{"network_name": payload.NetworkName})
+	tflog.Info(ctx, "Creating ZCC trusted network", map[string]any{"name": payload.Name, "api_version": backend.Version()})
 
-	created, _, err := trusted_network_v2.Create(ctx, service, &payload)
+	created, err := backend.Create(ctx, &payload)
 	if err != nil {
 		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to create trusted network: %v", err))
 		return
@@ -185,22 +190,22 @@ func (r *TrustedNetworkResource) Read(ctx context.Context, req resource.ReadRequ
 		return
 	}
 
-	id, convErr := strconv.Atoi(state.ID.ValueString())
-	if convErr != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+	id := state.ID.ValueString()
+
+	backend, err := tnbackend.For(ctx, r.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
 		return
 	}
 
-	service := r.client.Service
-	net, err := trusted_network_v2.Get(ctx, service, id)
+	net, err := backend.Get(ctx, id)
 	if err != nil {
-		var respErr *errorx.ErrorResponse
-		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+		if tnbackend.IsNotFound(err) {
 			tflog.Info(ctx, "Removing trusted network from state - no longer exists", map[string]any{"id": id})
 			resp.State.RemoveResource(ctx)
 			return
 		}
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read trusted network %d: %v", id, err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to read trusted network %s: %v", id, err))
 		return
 	}
 
@@ -225,21 +230,20 @@ func (r *TrustedNetworkResource) Update(ctx context.Context, req resource.Update
 		return
 	}
 
-	id, convErr := strconv.Atoi(state.ID.ValueString())
-	if convErr != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+	id := state.ID.ValueString()
+
+	backend, err := tnbackend.For(ctx, r.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
 		return
 	}
-
-	service := r.client.Service
 	payload := expandTrustedNetwork(&plan)
-	payload.ID = id
 
-	tflog.Info(ctx, "Updating ZCC trusted network", map[string]any{"id": id})
+	tflog.Info(ctx, "Updating ZCC trusted network", map[string]any{"id": id, "api_version": backend.Version()})
 
-	updated, _, err := trusted_network_v2.Update(ctx, service, id, &payload)
+	updated, err := backend.Update(ctx, id, &payload)
 	if err != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update trusted network %d: %v", id, err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to update trusted network %s: %v", id, err))
 		return
 	}
 
@@ -258,10 +262,15 @@ func (r *TrustedNetworkResource) Update(ctx context.Context, req resource.Update
 //     DELETE, the resulting 404 is also treated as success — the goal
 //     state ("record does not exist") has been reached either way.
 //
-// Both branches go through the structured errorx.ErrorResponse +
-// IsObjectNotFound() helper rather than substring-matching the error
-// message, because the ZCC v2 endpoints return varied 404 bodies
-// (e.g. `{"code":3199,"message":"Record not available"}`).
+// Both branches go through tnbackend.IsNotFound — which wraps the
+// structured errorx.ErrorResponse + IsObjectNotFound() helper — rather
+// than substring-matching the error message, because the ZCC endpoints
+// return varied 404 bodies (e.g. `{"code":3199,"message":"Record not
+// available"}`).
+//
+// On the v1 backend the pre-delete GET is skipped: v1 has no GET-by-id
+// (reads are paginated list scans), so per the list-based-GET exception
+// only the 404 on the DELETE call is tolerated.
 func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.DeleteRequest, resp *resource.DeleteResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before managing resources.")
@@ -274,31 +283,31 @@ func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.Delete
 		return
 	}
 
-	id, convErr := strconv.Atoi(state.ID.ValueString())
-	if convErr != nil {
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Trusted network id %q is not a valid integer: %v", state.ID.ValueString(), convErr))
+	id := state.ID.ValueString()
+
+	backend, err := tnbackend.For(ctx, r.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Client Error", err.Error())
 		return
 	}
 
-	service := r.client.Service
-
-	if _, err := trusted_network_v2.Get(ctx, service, id); err != nil {
-		var respErr *errorx.ErrorResponse
-		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
-			tflog.Info(ctx, "Trusted network already removed upstream; nothing to delete", map[string]any{"id": id})
-			return
+	if backend.SupportsGetByID() {
+		if _, err := backend.Get(ctx, id); err != nil {
+			if tnbackend.IsNotFound(err) {
+				tflog.Info(ctx, "Trusted network already removed upstream; nothing to delete", map[string]any{"id": id})
+				return
+			}
+			tflog.Warn(ctx, "Pre-delete GET failed; proceeding to DELETE anyway", map[string]any{"id": id, "error": err.Error()})
 		}
-		tflog.Warn(ctx, "Pre-delete GET failed; proceeding to DELETE anyway", map[string]any{"id": id, "error": err.Error()})
 	}
 
-	tflog.Info(ctx, "Deleting ZCC trusted network", map[string]any{"id": id})
-	if _, err := trusted_network_v2.Delete(ctx, service, id); err != nil {
-		var respErr *errorx.ErrorResponse
-		if errors.As(err, &respErr) && respErr.IsObjectNotFound() {
+	tflog.Info(ctx, "Deleting ZCC trusted network", map[string]any{"id": id, "api_version": backend.Version()})
+	if err := backend.Delete(ctx, id); err != nil {
+		if tnbackend.IsNotFound(err) {
 			tflog.Info(ctx, "Trusted network was removed between GET and DELETE; treating as success", map[string]any{"id": id})
 			return
 		}
-		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete trusted network %d: %v", id, err))
+		resp.Diagnostics.AddError("Client Error", fmt.Sprintf("Failed to delete trusted network %s: %v", id, err))
 	}
 }
 
@@ -306,8 +315,10 @@ func (r *TrustedNetworkResource) Delete(ctx context.Context, req resource.Delete
 //   - `terraform import zcc_trusted_network.this 12345` — numeric id is
 //     written straight into state and the next Read fills the rest.
 //   - `terraform import zcc_trusted_network.this Corp-WiFi` — looked up
-//     by case-insensitive Name through the v2 SDK's GetByName helper,
-//     then the resolved id is written into state.
+//     by name through the active backend's GetByName, then the resolved
+//     id is written into state. An exact (case-insensitive) match wins;
+//     a partial name resolves only when it matches exactly one network,
+//     and an ambiguous partial name fails listing the candidates.
 func (r *TrustedNetworkResource) ImportState(ctx context.Context, req resource.ImportStateRequest, resp *resource.ImportStateResponse) {
 	if r.client == nil {
 		resp.Diagnostics.AddError("Unconfigured Provider", "The provider must be configured before importing resources.")
@@ -320,8 +331,12 @@ func (r *TrustedNetworkResource) ImportState(ctx context.Context, req resource.I
 		return
 	}
 
-	service := r.client.Service
-	net, err := trusted_network_v2.GetByName(ctx, service, id)
+	backend, err := tnbackend.For(ctx, r.client.Service)
+	if err != nil {
+		resp.Diagnostics.AddError("Import Error", err.Error())
+		return
+	}
+	net, err := backend.GetByName(ctx, id)
 	if err != nil {
 		resp.Diagnostics.AddError("Import Error", fmt.Sprintf("Unable to import trusted network %q: %v", id, err))
 		return

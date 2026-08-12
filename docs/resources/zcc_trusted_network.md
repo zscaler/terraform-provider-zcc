@@ -14,9 +14,22 @@ description: |-
 * [Automation Hub API reference](https://automate.zscaler.com/docs/api-reference-and-guides/api-reference/zcc/public-api-controller)
 * [Legacy API reference](https://help.zscaler.com/legacy-apis/public-api-controller)
 
-Manages a ZCC **trusted network** through `/zcc/papi/public/v2/trusted-networks`. A trusted network defines a set of criteria (DNS servers, search domains, hostname, SSID, DHCP / gateway / egress IPs, subnets) that the Client Connector evaluates to determine whether the endpoint is on a known corporate network. Matching networks are typically referenced by forwarding profiles (`zcc_forwarding_profile.trusted_network_ids`) to apply different forwarding behavior.
+Manages a ZCC **trusted network**. A trusted network defines a set of criteria (DNS servers, search domains, hostname, SSID, DHCP / gateway / egress IPs, subnets) that the Client Connector evaluates to determine whether the endpoint is on a known corporate network. Matching networks are typically referenced by forwarding profiles (`zcc_forwarding_profile.trusted_network_ids`) to apply different forwarding behavior.
 
-> The v2 endpoint exchanges IP / domain criteria as **lists of strings** on the wire — the v1 comma-separated string surface is gone. Pass an empty list (`[]`) for any criterion you do not want to set.
+> The IP / domain criteria fields are **lists of strings** in HCL regardless of API version — the v1 comma-separated string surface is not exposed. Pass an empty list (`[]`) for any criterion you do not want to set.
+
+## API Version Compatibility
+
+The newer `/zcc/papi/public/v2/trusted-networks` endpoints are not yet enabled on every Zscaler tenant. This resource handles that transparently while keeping the **same HCL** on both tenant generations — there is nothing to configure:
+
+* The first trusted-network operation probes the v2 list endpoint once per Terraform run. If the tenant serves it, all operations use v2; otherwise the provider falls back to the legacy `/zcc/papi/public/v1/webTrustedNetwork` endpoints, converting between the two wire formats internally (list criteria ↔ comma-separated strings, `ALL`/`ANY` ↔ numeric condition codes).
+* When a tenant later gains the v2 endpoints, the next Terraform run picks them up automatically — state is written in the same shape on both versions, so no migration is needed.
+
+Behavioral notes when a tenant is served by **v1**:
+
+* `name` is **required**: the v1 create response carries no ID, so the provider resolves the new record by its network name. Names should be unique per tenant.
+* Reads are paginated list scans (v1 has no GET-by-id), which can be slower on tenants with many trusted networks.
+* `zpa_id` does not exist on v1 and stays empty on the data source.
 
 ## Example Usage
 
@@ -71,4 +84,4 @@ resource "zcc_trusted_network" "corp_office" {
 terraform import zcc_trusted_network.corp_office <id>
 ```
 
-The handler accepts either a numeric ID or a string identifier that resolves through the trusted-network list API.
+The handler accepts either a numeric ID or a network name that resolves through the trusted-network list API. An exact name match (case-insensitive) always wins; a partial name is accepted when it unambiguously matches a single network (for example `TrustedNetwork02` resolves `BD-TrustedNetwork02` if no other network contains that string), and an ambiguous partial name fails with the list of candidates.

@@ -91,7 +91,8 @@ The provider authenticates **exclusively** through Zidentity OneAPI. The legacy 
 | `vanity_domain` / `ZSCALER_VANITY_DOMAIN` | yes |  |
 | `zscaler_cloud` / `ZSCALER_CLOUD` | optional | e.g. `beta`; required for non-prod Zidentity clouds |
 | `http_proxy` / `ZSCALER_HTTP_PROXY` | optional |  |
-| `max_retries`, `request_timeout`, `min_wait_seconds`, `max_wait_seconds`, `parallelism` | optional | Tuning knobs |
+| `max_retries`, `request_timeout`, `min_wait_seconds`, `max_wait_seconds` | optional | Tuning knobs |
+| `parallelism` | deprecated | Ignored; never wired to anything. Do not consume it or add a provider-wide concurrency throttle — rate limiting is handled by `Retry-After` retries in the request layer. |
 
 ### Build path
 

@@ -75,10 +75,3 @@ release:
   #   owner: zscaler
   #   name: terraform-provider-zcc
   draft: true
-  # `prerelease: auto` flips the GitHub release's Pre-release flag
-  # automatically when the tag has a SemVer pre-release suffix
-  # (e.g. `v0.1.0-beta.1`, `v0.1.0-rc.1`). Combined with `draft: true`
-  # above, the drafted release lands in the GitHub UI with the
-  # Pre-release radio already selected, which keeps beta builds off
-  # the "latest" channel on both GitHub and the Terraform Registry.
-  prerelease: auto
