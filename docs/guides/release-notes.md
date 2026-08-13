@@ -10,9 +10,20 @@ description: |-
 Track ZCC Terraform provider releases: resources, data sources, and fixes.
 
 ---
-``Last updated: v0.1.1``
+``Last updated: v0.1.2``
 
 ---
+
+## 0.1.2 (August 13, 2026)
+
+### Notes
+
+- Release date: **(August 13, 2026)**
+- Supported Terraform version: **v1.x**
+
+### Bug Fixes
+
+- [PR #27](https://github.com/zscaler/terraform-provider-zcc/pull/27) - `zcc_trusted_network`: fixed the reversed `condition_type` mapping on tenants served by the v1 API (`0` = `ALL`, `1` = `ANY`) and stopped `hostname`/`ssid` from showing `(known after apply)` on update plans when not set in the configuration.
 
 ## 0.1.1 (July 30, 2026)
 

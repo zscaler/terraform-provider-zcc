@@ -12,18 +12,15 @@ import (
 // v1 numeric conditionType values. The v1 API encodes the match policy
 // as an int where v2 uses "ALL"/"ANY".
 //
-// The mapping below (1=ALL, 2=ANY) is derived from correlating
-// operator-created records across a v1-only tenant (conditionType: 1)
-// and a v2-enabled tenant where the same-named networks report "ALL",
-// and matches the {1,2} values used by the SDK's v1 unit fixtures. It
-// has not yet been confirmed against a tenant that serves both endpoint
-// generations — if it ever proves wrong, this constant pair is the only
-// place to fix. HCL authors can always bypass the mapping entirely by
-// setting condition_type to the raw numeric string ("1", "2"), which is
+// The mapping (0=ALL, 1=ANY) is field-verified against a tenant serving
+// both endpoint generations: the same record reads conditionType 0 via
+// /v1/webTrustedNetwork when /v2/trusted-networks reports "ALL", and 1
+// when v2 reports "ANY". HCL authors can bypass the mapping entirely by
+// setting condition_type to the raw numeric string ("0", "1"), which is
 // passed to the v1 API verbatim.
 const (
-	v1ConditionTypeAll = 1
-	v1ConditionTypeAny = 2
+	v1ConditionTypeAll = 0
+	v1ConditionTypeAny = 1
 )
 
 // conditionTypeToV1 maps the canonical condition_type string to the v1

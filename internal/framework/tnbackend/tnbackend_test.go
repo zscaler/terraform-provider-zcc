@@ -49,10 +49,13 @@ func TestConditionTypeRoundTrip(t *testing.T) {
 		in   int
 		want string
 	}{
+		// Field-verified mapping: 0=ALL, 1=ANY.
+		{0, "ALL"},
+		{1, "ANY"},
 		{v1ConditionTypeAll, "ALL"},
 		{v1ConditionTypeAny, "ANY"},
 		// Unknown values round-trip as their decimal string.
-		{0, "0"},
+		{2, "2"},
 		{7, "7"},
 	}
 	for _, tc := range fromV1 {
