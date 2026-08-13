@@ -9,7 +9,7 @@
 
 ### Bug Fixes
 
-- [PR #27](https://github.com/zscaler/terraform-provider-zcc/pull/27) - `zcc_trusted_network`: fixed the reversed `condition_type` mapping on tenants served by the v1 API (`0` = `ALL`, `1` = `ANY`) and stopped `hostname`/`ssid` from showing `(known after apply)` on update plans when not set in the configuration.
+- [PR #28](https://github.com/zscaler/terraform-provider-zcc/pull/28) - `zcc_trusted_network`: fixed the reversed `condition_type` mapping on tenants served by the v1 API (`0` = `ALL`, `1` = `ANY`) and stopped `hostname`/`ssid` from showing `(known after apply)` on update plans when not set in the configuration.
 
 ## 0.1.1 (August 12, 2026)
 
