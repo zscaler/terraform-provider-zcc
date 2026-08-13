@@ -117,11 +117,17 @@ func (r *TrustedNetworkResource) Schema(ctx context.Context, req resource.Schema
 				Optional:    true,
 				Computed:    true,
 				Description: "Hostname used to identify the network. API field: hostname.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"ssid": schema.StringAttribute{
 				Optional:    true,
 				Computed:    true,
 				Description: "Wi-Fi SSID the network is identified by. API field: ssid.",
+				PlanModifiers: []planmodifier.String{
+					stringplanmodifier.UseStateForUnknown(),
+				},
 			},
 			"dns_search_domains":        stringListOC("DNS search domains. API field: dnsSearchDomains."),
 			"dns_server_ips":            stringListOC("DNS server IPs. API field: dnsServerIps."),
